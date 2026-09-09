@@ -1,0 +1,235 @@
+<div class="matrix-menu" id="matrix-menu" data-theme="dark">
+    <div class="header">
+        <div class="title">
+            <span>Matrix Client</span>
+        </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="mods">Mods</button>
+            <button class="tab" data-tab="settings">Settings</button>
+            <button class="tab" data-tab="mmmd">MMMD</button>
+        </div>
+        <button class="close" id="matrix-close">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="toolbar">
+        <div class="search">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input type="text" id="matrix-search" placeholder="Search...">
+        </div>
+    </div>
+
+    <div class="mods" id="matrix-mods-panel">
+        <div class="card" data-mod="zoom">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                <line x1="11" y1="8" x2="11" y2="14" />
+                <line x1="8" y1="11" x2="14" y2="11" />
+            </svg>
+            <div class="name">Zoom</div>
+            <div class="card-btn">
+                <button class="options" data-options="zoom">Options</button>
+                <button class="toggle-btn" data-toggle="zoom">Disabled</button>
+            </div>
+        </div>
+        <div class="card" data-mod="adblocker">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+            </svg>
+            <div class="name">Ad Blocker</div>
+            <div class="card-btn">
+                <button class="toggle-btn" data-toggle="adblocker">Disabled</button>
+            </div>
+        </div>
+        <div class="card" data-mod="rpc">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="9" cy="12" r="1" />
+                <circle cx="15" cy="12" r="1" />
+                <path d="M7.5 7.5c3.5-1 5.5-1 9 0" />
+                <path d="M7 16.5c3.5 1 6.5 1 10 0" />
+                <path d="M15.5 17c0 1 1.5 3 2 3 1.5 0 2.833-1.667 3.5-3 .667-1.667.5-5.833-1.5-11.5-1.457-1.015-3-1.34-4.5-1.5l-1 2.5" />
+                <path d="M8.5 17c0 1-1.356 3-1.832 3-1.429 0-2.698-1.667-3.333-3-.635-1.667-.476-5.833 1.428-11.5C6.151 4.485 7.545 4.16 9 4l1 2.5" />
+            </svg>
+            <div class="name">Discord RPC</div>
+            <div class="card-btn">
+                <button class="options" data-options="rpc">Options</button>
+                <button class="toggle-btn" data-toggle="rpc">Disabled</button>
+            </div>
+        </div>
+
+        <div class="card matrix-visual-mod" data-mod="minecraft-textures">
+            <div class="name">Texture Pack</div>
+            <div class="card-btn">
+                <button class="options" data-options="minecraft-textures">Options</button>
+                <button class="toggle-btn" data-toggle="minecraft-textures">Disabled</button>
+            </div>
+        </div>
+
+        <div class="card" data-mod="advanced-mods">
+            <div class="name">Advanced Mods</div>
+            <div class="card-btn">
+                <button class="options" data-options="advanced-mods">Options</button>
+                <button class="toggle-btn" data-toggle="advanced-mods">Disabled</button>
+            </div>
+        </div>
+        <div class="card" data-mod="translation">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 5h16v11H7l-3 3V5z"/><path d="M8 9h8M8 12h5"/></svg>
+            <div class="name">Matrix Translation</div>
+            <div class="card-btn">
+                <button class="options" data-options="translation">Options</button>
+                <button class="toggle-btn" data-toggle="translation">Disabled</button>
+            </div>
+        </div>
+        <div class="card" data-mod="clean-screen"><div class="name">Clear Screen</div><div class="card-btn"><button class="options" data-options="clean-screen">Options</button><button class="toggle-btn" data-toggle="clean-screen">Disabled</button></div></div>
+        <div class="card" data-mod="smooth-camera"><div class="name">Smooth Camera</div><div class="card-btn"><button class="options" data-options="smooth-camera">Options</button><button class="toggle-btn" data-toggle="smooth-camera">Disabled</button></div></div>
+        <div class="card" data-mod="cinematic-fx"><div class="name">Cinematic FX</div><div class="card-btn"><button class="options" data-options="cinematic-fx">Options</button><button class="toggle-btn" data-toggle="cinematic-fx">Disabled</button></div></div>
+        <div class="card" data-mod="mouse-trail"><div class="name">Mouse Trail</div><div class="card-btn"><button class="options" data-options="mouse-trail">Options</button><button class="toggle-btn" data-toggle="mouse-trail">Disabled</button></div></div>
+        <div class="card" data-mod="stopwatch"><div class="name">Stopwatch</div><div class="card-btn"><button class="options" data-options="stopwatch">Options</button><button class="toggle-btn" data-toggle="stopwatch">Disabled</button></div></div>
+        <div class="card" data-mod="display-enhancer"><div class="name">Display Enhancer</div><div class="card-btn"><button class="options" data-options="display-enhancer">Options</button><button class="toggle-btn" data-toggle="display-enhancer">Disabled</button></div></div>
+        <div class="card" data-mod="visual-keyboard"><div class="name">Visual Keyboard</div><div class="card-btn"><button class="options" data-options="visual-keyboard">Options</button><button class="toggle-btn" data-toggle="visual-keyboard">Disabled</button></div></div>
+        <div class="card" data-mod="fps-counter"><div class="name">FPS Counter</div><div class="card-btn"><button class="options" data-options="fps-counter">Options</button><button class="toggle-btn" data-toggle="fps-counter">Disabled</button></div></div>
+        <div class="card" data-mod="hub">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
+            <div class="name">Matrix Hub</div>
+            <div class="card-btn">
+                <button class="options" data-options="hub">Options</button>
+                <button class="toggle-btn" data-toggle="hub">Disabled</button>
+            </div>
+        </div>
+        <div class="card" data-mod="keystrokes">
+            <svg class="card-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+            </svg>
+            <div class="name">Keystrokes</div>
+            <div class="card-btn">
+                <button class="options" data-options="keystrokes">Options</button>
+                <button class="toggle-btn" data-toggle="keystrokes">Disabled</button>
+            </div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-shader">
+            <div class="name">Shaders</div>
+            <div class="card-btn"><button class="options" data-options="visual-shader">Options</button><button class="toggle-btn" data-toggle="visual-shader">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-dark">
+            <div class="name">Dark Mode</div>
+            <div class="card-btn"><button class="options" data-options="visual-dark">Options</button><button class="toggle-btn" data-toggle="visual-dark">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-fullbright">
+            <div class="name">Full Bright</div>
+            <div class="card-btn"><button class="toggle-btn" data-toggle="visual-fullbright">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-galaxy">
+            <div class="name">Galaxy Mode</div>
+            <div class="card-btn"><button class="toggle-btn" data-toggle="visual-galaxy">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-weather">
+            <div class="name">Weather FX</div>
+            <div class="card-btn"><button class="options" data-options="visual-weather">Options</button><button class="toggle-btn" data-toggle="visual-weather">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-screen">
+            <div class="name">Screen Effects</div>
+            <div class="card-btn"><button class="toggle-btn" data-toggle="visual-screen">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-flashlight">
+            <div class="name">Flashlight</div>
+            <div class="card-btn"><button class="toggle-btn" data-toggle="visual-flashlight">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-crosshair">
+            <div class="name">Crosshair</div>
+            <div class="card-btn"><button class="options" data-options="visual-crosshair">Options</button><button class="toggle-btn" data-toggle="visual-crosshair">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-hud">
+            <div class="name">Game HUD</div>
+            <div class="card-btn"><button class="options" data-options="visual-hud">Options</button><button class="toggle-btn" data-toggle="visual-hud">Disabled</button></div>
+        </div>
+        <div class="card matrix-visual-mod" data-mod="visual-fonts">
+            <div class="name">Font Manager</div>
+            <div class="card-btn"><button class="options" data-options="visual-fonts">Options</button></div>
+        </div>
+    </div>
+
+    <div id="matrix-mmmd-panel" class="mmmd-panel" style="display:none">
+        <div class="mmmd-hero">
+            <div class="mmmd-title">MMMD</div>
+            <div class="mmmd-subtitle">MathPRIME × Minefuncito × MrNeptuno × Degx</div>
+        </div>
+        <div class="mmmd-section-title">Administrators</div>
+        <div class="mmmd-grid">
+            <div class="mmmd-card"><div class="mmmd-name">MathPRIME</div><div class="mmmd-role">ADMIN</div><div class="mmmd-handle">@mathPRIME-oficial</div></div>
+            <div class="mmmd-card"><div class="mmmd-name">Minefuncito</div><div class="mmmd-role">ADMIN</div><div class="mmmd-handle">@minefuncito</div></div>
+            <div class="mmmd-card"><div class="mmmd-name">MrNeptuno</div><div class="mmmd-role">ADMIN</div><div class="mmmd-handle">@MrNeptunoYT</div></div>
+            <div class="mmmd-card"><div class="mmmd-name">Degx</div><div class="mmmd-role">ADMIN</div><div class="mmmd-handle">@DegxTY</div></div>
+        </div>
+        <div class="mmmd-section-title">Player Progress</div>
+        <div class="mmmd-stat-grid">
+            <div class="mmmd-stat"><span>Playtime</span><strong id="mmmd-playtime">0h 0m</strong></div>
+            <div class="mmmd-stat"><span>Points</span><strong id="mmmd-points">0</strong></div>
+            <div class="mmmd-stat"><span>Rank</span><strong id="mmmd-rank">New Player</strong></div>
+            <div class="mmmd-stat"><span>Fan Status</span><strong id="mmmd-fan">Not verified</strong></div>
+        </div>
+        <div class="mmmd-note">MegaFan verification is reserved for the future MMMD account/YouTube verification service.</div>
+    </div>
+
+    <div id="matrix-settings-panel">
+        <div class="setting-row">
+            <label>Auto Fullscreen</label>
+            <div class="opt-toggle">
+                <input type="checkbox" id="client-autofullscreen-btn">
+                <label for="client-autofullscreen-btn"></label>
+            </div>
+        </div>
+        <div class="setting-row">
+            <label>Menu Keybind</label>
+
+            <div class="keybind-box" id="client-keybind-btn"></div>
+        </div>
+
+        <div class="setting-row" id="startup-opening-row">
+            <label>Opening Screen</label>
+            <select class="text-box" id="startup-opening-mode">
+                <option value="original">Original Matrix opening</option>
+                <option value="matrix">Matrix Custom opening</option>
+                <option value="imported">Imported video</option>
+                <option value="remote">Online custom opening</option>
+            </select>
+        </div>
+        <div class="setting-row" id="startup-opening-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="opt-btn" id="startup-use-matrix">Use Matrix Custom</button>
+            <button class="opt-btn" id="startup-import-video">Import Video</button>
+            <button class="opt-btn" id="startup-online-opening">Choose Online Opening</button>
+            <button class="opt-btn" id="startup-reset-original">Use Original</button>
+        </div>
+        <div class="setting-row" id="startup-opening-status" style="font-size:11px;color:var(--grey-2);">Original opening is active.</div>
+        </div>
+
+        <div class="setting-row">
+            <label>URL</label>
+            <div class="site-buttons">
+                <button class="site-btn active" id="btn-main">
+                    minefun.io
+                </button>
+                <button class="site-btn" id="btn-sandbox">
+                    sandbox.minefun.io
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="options-panel" id="matrix-options-panel">
+        <div class="options-header">
+            <button class="options-back" id="matrix-options-back"><span>﹤</span></button>
+            <span id="matrix-options-title">Options</span>
+        </div>
+        <div class="options-body" id="matrix-options-body"></div>
+    </div>
+</div>
