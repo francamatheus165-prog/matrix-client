@@ -1,0 +1,112 @@
+name: Matrix Client — GitHub Auto Update
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: matrix-client-auto-release
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stamp GitHub build
+        shell: pwsh
+        run: |
+          $info = @{
+            version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            buildId = "${{ github.sha }}"
+            channel = "github-auto"
+            source = "github-push"
+            commit = "${{ github.sha }}"
+            runNumber = "${{ github.run_number }}"
+            builtAt = (Get-Date).ToUniversalTime().ToString("o")
+          } | ConvertTo-Json
+          Set-Content -Path "src/update-info.json" -Value $info -Encoding UTF8
+
+      - name: Build Windows app
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Create single update ZIP
+        shell: pwsh
+        run: |
+          $zip = "Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Create update manifest
+        shell: pwsh
+        run: |
+          $sha = (Get-FileHash "Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip" -Algorithm SHA256).Hash.ToLower()
+          $manifest = @{
+            latestVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            buildId = "${{ github.sha }}"
+            channel = "github-auto"
+            source = "github-push"
+            mandatory = $false
+            changelog = "Automatic GitHub build from commit ${{ github.sha }}."
+            notes = @(
+              "Every push to main/master creates a new automatic build.",
+              "The official update package is the single Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip file.",
+              "SHA-256: $sha"
+            )
+            sha256 = $sha
+            packageName = "Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip"
+          } | ConvertTo-Json -Depth 5
+          Set-Content -Path "matrix-manifest.json" -Value $manifest -Encoding UTF8
+
+      - name: Create or update GitHub auto release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "matrix-auto"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --title "Matrix Client — GitHub Auto Update" `
+              --notes "Rolling automatic build. Updated on every push to main/master." `
+              --prerelease `
+              --target "${{ github.sha }}"
+          } else {
+            gh release edit $tag `
+              --title "Matrix Client — GitHub Auto Update" `
+              --notes "Rolling automatic build. Current commit: ${{ github.sha }}" `
+              --prerelease `
+              --target "${{ github.sha }}"
+          }
+
+      - name: Upload the single official ZIP and manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release upload matrix-auto `
+            "Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip" `
+            "matrix-manifest.json" `
+            --clobber
+
