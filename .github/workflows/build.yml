@@ -1,23 +1,24 @@
-name: Matrix Client — GitHub Auto Build
+name: Matrix Client — Automatic Windows Build
 
 on:
   push:
     branches:
       - main
       - master
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: matrix-client-auto-build
+  group: matrix-client-build
   cancel-in-progress: true
 
 env:
-  PACKAGE_NAME: Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip
+  APP_NAME: Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES
   RELEASE_TAG: matrix-auto
-  RELEASE_NAME: Matrix Client — GitHub Auto Update
+  RELEASE_NAME: Matrix Client — Automatic Build
 
 jobs:
   build-windows:
@@ -25,11 +26,17 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # ============================================================
+      # 1. BAIXAR O CÓDIGO DO REPOSITÓRIO
+      # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
+      # ============================================================
+      # 2. NODE.JS
+      # ============================================================
       - name: Setup Node.js 24
         uses: actions/setup-node@v5
         with:
@@ -37,92 +44,147 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      # ============================================================
+      # 3. INSTALAR DEPENDÊNCIAS
+      # ============================================================
       - name: Install dependencies
         run: npm install
 
-      - name: Create GitHub build information
+      # ============================================================
+      # 4. MOSTRAR INFORMAÇÕES DA BUILD
+      # ============================================================
+      - name: Show build information
         shell: pwsh
         run: |
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          Write-Host "=========================================="
+          Write-Host " MATRIX CLIENT — MATHPRIME"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Repository:"
+          Write-Host "francamatheus165-prog/matrix-client"
+          Write-Host ""
+          Write-Host "Commit:"
+          Write-Host "${{ github.sha }}"
+          Write-Host ""
+          Write-Host "Run:"
+          Write-Host "${{ github.run_number }}"
+          Write-Host ""
+          Write-Host "=========================================="
 
-          $info = @{
-            version = $pkg.version
-            buildId = "${{ github.sha }}"
-            channel = "github-auto"
+      # ============================================================
+      # 5. GERAR INFORMAÇÃO DA BUILD DENTRO DO CLIENT
+      # ============================================================
+      - name: Create build information
+        shell: pwsh
+        run: |
+          $buildInfo = @{
             repository = "francamatheus165-prog/matrix-client"
+            branch = "${{ github.ref_name }}"
             commit = "${{ github.sha }}"
-            runNumber = "${{ github.run_number }}"
-            builtAt = (Get-Date).ToUniversalTime().ToString("o")
-          } | ConvertTo-Json
-
-          Set-Content `
-            -Path "src/update-info.json" `
-            -Value $info `
-            -Encoding UTF8
-
-      - name: Build Matrix Client
-        run: npm run build
-
-      - name: Create official ZIP
-        shell: pwsh
-        run: |
-          $zip = $env:PACKAGE_NAME
-
-          if (Test-Path $zip) {
-            Remove-Item $zip -Force
-          }
-
-          if (!(Test-Path "dist/win-unpacked")) {
-            Write-Error "dist/win-unpacked não foi encontrado."
-            exit 1
-          }
-
-          Compress-Archive `
-            -Path "dist/win-unpacked/*" `
-            -DestinationPath $zip `
-            -CompressionLevel Optimal
-
-      - name: Create update manifest
-        shell: pwsh
-        run: |
-          $hash = (
-            Get-FileHash `
-              $env:PACKAGE_NAME `
-              -Algorithm SHA256
-          ).Hash.ToLower()
-
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-
-          $manifest = @{
-            latestVersion = $pkg.version
             buildId = "${{ github.sha }}"
-            channel = "github-auto"
-            repository = "francamatheus165-prog/matrix-client"
-            commit = "${{ github.sha }}"
             runNumber = "${{ github.run_number }}"
-            mandatory = $false
-            packageName = $env:PACKAGE_NAME
-            sha256 = $hash
-            changelog = "Automatic build from GitHub commit ${{ github.sha }}"
             generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+            channel = "github-auto"
           } | ConvertTo-Json -Depth 5
 
           Set-Content `
-            -Path "matrix-manifest.json" `
-            -Value $manifest `
+            -Path "src/update-info.json" `
+            -Value $buildInfo `
             -Encoding UTF8
 
-      - name: Upload GitHub Artifact
+      # ============================================================
+      # 6. GARANTIR QUE OS ASSETS DO CLIENT EXISTEM
+      # ============================================================
+      - name: Verify Matrix Client assets
+        shell: pwsh
+        run: |
+          $required = @(
+            "src/assets/icon.png",
+            "src/assets/customtag-matheus.png",
+            "src/assets/customtag-coconut.png",
+            "src/assets/matrix-custom-opening.webm"
+          )
+
+          foreach ($file in $required) {
+            if (!(Test-Path $file)) {
+              Write-Error "Arquivo obrigatório não encontrado: $file"
+              exit 1
+            }
+
+            Write-Host "OK: $file"
+          }
+
+      # ============================================================
+      # 7. BUILD DO ELECTRON
+      # ============================================================
+      - name: Build Matrix Client
+        run: npm run build
+
+      # ============================================================
+      # 8. LOCALIZAR O INSTALADOR NSIS
+      # ============================================================
+      - name: Find installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem `
+            -Path "dist" `
+            -Filter "*.exe" `
+            -File |
+            Where-Object {
+              $_.Name -notmatch "unins" -and
+              $_.Name -notmatch "setup-blockmap"
+            } |
+            Select-Object -First 1
+
+          if ($null -eq $installer) {
+            Write-Error "Nenhum instalador .exe foi encontrado dentro de dist."
+            exit 1
+          }
+
+          Write-Host "Instalador encontrado:"
+          Write-Host $installer.FullName
+
+          Copy-Item `
+            $installer.FullName `
+            "Matrix-Client-MathPRIME-Setup.exe" `
+            -Force
+
+      # ============================================================
+      # 9. VERIFICAR O EXE
+      # ============================================================
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          if (!(Test-Path "Matrix-Client-MathPRIME-Setup.exe")) {
+            Write-Error "O instalador final não foi criado."
+            exit 1
+          }
+
+          $file = Get-Item "Matrix-Client-MathPRIME-Setup.exe"
+
+          Write-Host "=========================================="
+          Write-Host " INSTALADOR FINAL"
+          Write-Host "=========================================="
+          Write-Host "Nome: $($file.Name)"
+          Write-Host "Tamanho: $($file.Length) bytes"
+          Write-Host "=========================================="
+
+      # ============================================================
+      # 10. ARTIFACT DO GITHUB
+      # SOMENTE O EXE
+      # ============================================================
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Matrix-Client-Windows-${{ github.run_number }}
-          path: |
-            ${{ env.PACKAGE_NAME }}
-            matrix-manifest.json
+          name: Matrix-Client-MathPRIME-Windows
+          path: Matrix-Client-MathPRIME-Setup.exe
           if-no-files-found: error
           retention-days: 30
 
-      - name: Create or update automatic Release
+      # ============================================================
+      # 11. CRIAR/ATUALIZAR RELEASE AUTOMÁTICA
+      # ============================================================
+      - name: Create or update automatic release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -130,27 +192,42 @@ jobs:
           gh release view $env:RELEASE_TAG *> $null
 
           if ($LASTEXITCODE -ne 0) {
+            Write-Host "Criando Release automática..."
+
             gh release create $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client build generated from GitHub." `
+              --notes "Automatic Matrix Client build from commit ${{ github.sha }}" `
               --prerelease `
               --target "${{ github.sha }}"
           }
           else {
+            Write-Host "Atualizando Release automática..."
+
             gh release edit $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client build. Current commit: ${{ github.sha }}" `
+              --notes "Automatic Matrix Client build from commit ${{ github.sha }}" `
               --prerelease `
               --target "${{ github.sha }}"
           }
 
-      - name: Publish official ZIP and manifest
+      # ============================================================
+      # 12. PUBLICAR SOMENTE O EXE
+      # ============================================================
+      - name: Publish Matrix Client installer
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload `
             $env:RELEASE_TAG `
-            $env:PACKAGE_NAME `
-            matrix-manifest.json `
+            Matrix-Client-MathPRIME-Setup.exe `
             --clobber
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " MATRIX CLIENT PUBLICADO COM SUCESSO"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Release: $env:RELEASE_TAG"
+          Write-Host "Arquivo: Matrix-Client-MathPRIME-Setup.exe"
+          Write-Host ""
