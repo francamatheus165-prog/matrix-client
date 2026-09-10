@@ -17,161 +17,147 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=256");
 
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 
-const UPDATE_INFO_FILE = path.join(__dirname, "update-info.json");
-const THE_TALKING_CAT_AVATAR_URL = "https://avatars.githubusercontent.com/u/266412468?s=60&v=4";
+const fs = require("fs");
+const os = require("os");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
+const https = require("https");
 
+const UPDATE_INFO_FILE = path.join(__dirname, "update-info.json");
+const UPDATE_STATE_FILE = path.join(app.getPath("userData"), "github-update-state.json");
 const GITHUB_AUTO_UPDATE = {
     owner: "francamatheus165-prog",
     repo: "matrix-client",
     tag: "matrix-auto",
-    packageAsset: "Matrix-Client-MathPRIME-Setup.exe",
-    downloadUrl: "https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe",
+    metadataUrl: "https://raw.githubusercontent.com/francamatheus165-prog/matrix-client/updates/latest.json",
+    installerUrl: "https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe",
+    installerName: "Matrix-Client-MathPRIME-Setup.exe",
+    checkIntervalMs: 30 * 1000,
 };
+
+let updateCheckInProgress = false;
+let updateInstalling = false;
 
 function getLocalUpdateInfo() {
     try {
-        return JSON.parse(require("fs").readFileSync(UPDATE_INFO_FILE, "utf8"));
+        return JSON.parse(fs.readFileSync(UPDATE_INFO_FILE, "utf8"));
     } catch (_) {
         return { version: app.getVersion(), buildId: "unknown", channel: "github-auto" };
     }
 }
 
-function githubRawJson(url, timeoutMs = 10000) {
-    const https = require("https");
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const finish = (err, value) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            if (err) reject(err); else resolve(value);
-        };
-
-        const cacheBust = (url.includes("?") ? "&" : "?") + "matrix_client=" + Date.now();
-        const request = https.get(url + cacheBust, {
-            headers: {
-                "Accept": "application/json,text/plain,*/*",
-                "User-Agent": "Matrix-Client-MathPRIME"
-            }
-        }, response => {
-            if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
-                response.resume();
-                return githubRawJson(response.headers.location, timeoutMs).then(v => finish(null, v), e => finish(e));
-            }
-            if (response.statusCode !== 200) {
-                response.resume();
-                return finish(new Error("GitHub update-info HTTP " + response.statusCode));
-            }
-            const chunks = [];
-            response.on("data", c => chunks.push(c));
-            response.on("end", () => {
-                try {
-                    finish(null, JSON.parse(Buffer.concat(chunks).toString("utf8")));
-                } catch (_) {
-                    finish(new Error("Invalid GitHub update-info response."));
-                }
-            });
-            response.on("error", finish);
-        });
-        request.on("error", finish);
-        const timer = setTimeout(() => {
-            request.destroy();
-            finish(new Error("GitHub update-info request timed out."));
-        }, timeoutMs);
-    });
+function getUpdateState() {
+    try {
+        return JSON.parse(fs.readFileSync(UPDATE_STATE_FILE, "utf8"));
+    } catch (_) {
+        return {};
+    }
 }
 
-function fetchImageDataUrl(url, timeoutMs = 12000) {
-    const https = require("https");
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const finish = (err, value) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            if (err) reject(err); else resolve(value);
-        };
+function saveUpdateState(state) {
+    try {
+        fs.mkdirSync(path.dirname(UPDATE_STATE_FILE), { recursive: true });
+        fs.writeFileSync(UPDATE_STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+    } catch (e) {
+        console.log("[Matrix] Could not save update state:", e.message);
+    }
+}
 
+function fetchJson(url, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
         const request = https.get(url, {
             headers: {
                 "User-Agent": "Matrix-Client-MathPRIME",
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/png,image/*,*/*;q=0.8"
+                "Accept": "application/json,text/plain,*/*",
+                "Cache-Control": "no-cache",
             }
         }, response => {
             if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
                 response.resume();
-                return fetchImageDataUrl(response.headers.location, timeoutMs).then(v => finish(null, v), e => finish(e));
-            }
-
-            if (response.statusCode !== 200) {
-                response.resume();
-                return finish(new Error("Image download failed with HTTP " + response.statusCode));
+                return fetchJson(response.headers.location, timeoutMs).then(resolve, reject);
             }
 
             const chunks = [];
             response.on("data", chunk => chunks.push(chunk));
             response.on("end", () => {
-                const buffer = Buffer.concat(chunks);
-                const contentType = String(response.headers["content-type"] || "image/png").split(";")[0];
-                finish(null, "data:" + contentType + ";base64," + buffer.toString("base64"));
+                if (response.statusCode !== 200) {
+                    return reject(new Error("GitHub metadata HTTP " + response.statusCode));
+                }
+                try {
+                    resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+                } catch (_) {
+                    reject(new Error("Invalid GitHub update metadata."));
+                }
             });
-            response.on("error", finish);
         });
 
-        request.on("error", finish);
-        const timer = setTimeout(() => {
-            request.destroy();
-            finish(new Error("Image download timed out."));
-        }, timeoutMs);
-    });
-}
-
-const UPDATE_INFO_RAW_URL =
-    "https://raw.githubusercontent.com/francamatheus165-prog/matrix-client/main/src/update-info.json";
-
-function githubAutoUpdateInfo() {
-    return githubRawJson(UPDATE_INFO_RAW_URL);
-}
-
-function downloadToFile(url, destination) {
-    const https = require("https");
-    const fs = require("fs");
-    return new Promise((resolve, reject) => {
-        const request = https.get(url, {
-            headers: { "User-Agent": "Matrix-Client-MathPRIME", "Accept": "application/octet-stream" }
-        }, response => {
-            if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
-                response.resume();
-                return downloadToFile(response.headers.location, destination).then(resolve, reject);
-            }
-            if (response.statusCode !== 200) {
-                response.resume();
-                return reject(new Error("Download failed with HTTP " + response.statusCode));
-            }
-            const file = fs.createWriteStream(destination);
-            response.pipe(file);
-            file.on("finish", () => file.close(resolve));
-            file.on("error", err => { try { fs.unlinkSync(destination); } catch (_) {} reject(err); });
+        request.setTimeout(timeoutMs, () => {
+            request.destroy(new Error("GitHub update check timed out."));
         });
         request.on("error", reject);
     });
 }
 
+function downloadToFile(url, destination, timeoutMs = 120000) {
+    return new Promise((resolve, reject) => {
+        const request = https.get(url, {
+            headers: {
+                "User-Agent": "Matrix-Client-MathPRIME",
+                "Accept": "application/octet-stream",
+                "Cache-Control": "no-cache",
+            }
+        }, response => {
+            if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
+                response.resume();
+                return downloadToFile(response.headers.location, destination, timeoutMs).then(resolve, reject);
+            }
+
+            if (response.statusCode !== 200) {
+                response.resume();
+                return reject(new Error("Update download failed with HTTP " + response.statusCode));
+            }
+
+            const file = fs.createWriteStream(destination);
+            response.pipe(file);
+            file.on("finish", () => file.close(() => resolve(destination)));
+            file.on("error", err => {
+                try { fs.unlinkSync(destination); } catch (_) {}
+                reject(err);
+            });
+        });
+
+        request.setTimeout(timeoutMs, () => {
+            request.destroy(new Error("Update download timed out."));
+        });
+        request.on("error", err => {
+            try { fs.unlinkSync(destination); } catch (_) {}
+            reject(err);
+        });
+    });
+}
+
 async function installGithubUpdate(remote) {
-    const fs = require("fs");
-    const os = require("os");
-    const crypto = require("crypto");
-    const { spawn } = require("child_process");
+    if (updateInstalling) return false;
+    updateInstalling = true;
 
     const updateDir = path.join(os.tmpdir(), "matrix-client-github-update");
-    fs.rmSync(updateDir, { recursive: true, force: true });
-    fs.mkdirSync(updateDir, { recursive: true });
+    const installerPath = path.join(updateDir, GITHUB_AUTO_UPDATE.installerName);
+    const scriptPath = path.join(updateDir, "launch-update.ps1");
+    const currentExe = app.getPath("exe");
+    const currentPid = process.pid;
 
-    const installerPath = path.join(updateDir, GITHUB_AUTO_UPDATE.packageAsset);
-    await downloadToFile(remote.downloadUrl, installerPath);
+    try {
+        fs.rmSync(updateDir, { recursive: true, force: true });
+        fs.mkdirSync(updateDir, { recursive: true });
 
-    const expected = String(remote.sha256 || "").toLowerCase();
-    if (expected) {
+        const expected = String(remote.sha256 || "").toLowerCase();
+        if (!/^[a-f0-9]{64}$/.test(expected)) {
+            throw new Error("GitHub update metadata has an invalid SHA-256.");
+        }
+
+        const downloadUrl = String(remote.installerUrl || GITHUB_AUTO_UPDATE.installerUrl);
+        await downloadToFile(downloadUrl, installerPath);
+
         const actual = crypto
             .createHash("sha256")
             .update(fs.readFileSync(installerPath))
@@ -181,83 +167,74 @@ async function installGithubUpdate(remote) {
         if (actual !== expected) {
             throw new Error("GitHub update SHA-256 verification failed.");
         }
-    }
 
-    const scriptPath = path.join(updateDir, "apply-update.ps1");
-    const escaped = value => String(value).replace(/'/g, "''");
-
-    const script = `
+        const escaped = value => String(value).replace(/'/g, "''");
+        const script = `
 $ErrorActionPreference = 'Stop'
 $installer = '${escaped(installerPath)}'
-$appExe = '${escaped(app.getPath("exe"))}'
-Start-Sleep -Seconds 2
-if (-not (Test-Path $installer)) { throw 'Matrix Client installer not found.' }
+$targetExe = '${escaped(currentExe)}'
+$oldPid = ${currentPid}
+Start-Sleep -Seconds 1
+while (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {
+    Start-Sleep -Milliseconds 250
+}
 Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+if (Test-Path $targetExe) {
+    Start-Process -FilePath $targetExe
+}
 Remove-Item '${escaped(updateDir)}' -Recurse -Force -ErrorAction SilentlyContinue
-if (Test-Path $appExe) { Start-Process -FilePath $appExe }
 `;
 
-    fs.writeFileSync(scriptPath, script, "utf8");
+        fs.writeFileSync(scriptPath, script, "utf8");
 
-    spawn(
-        "powershell.exe",
-        [
+        spawn("powershell.exe", [
             "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
-            scriptPath
-        ],
-        {
+            "-NonInteractive",
+            "-ExecutionPolicy", "Bypass",
+            "-WindowStyle", "Hidden",
+            "-File", scriptPath
+        ], {
             detached: true,
             stdio: "ignore",
             windowsHide: true
-        }
-    ).unref();
+        }).unref();
 
-    app.quit();
-    return true;
+        console.log("[Matrix] Starting silent GitHub update:", remote.buildId);
+        app.quit();
+        return true;
+    } catch (e) {
+        updateInstalling = false;
+        console.log("[Matrix] GitHub update installation failed:", e.message);
+        try { fs.rmSync(updateDir, { recursive: true, force: true }); } catch (_) {}
+        return false;
+    }
 }
-
-let updateCheckInProgress = false;
 
 async function checkGithubAutoUpdate({ install = true } = {}) {
     const settings = loadSettings();
-    if (settings["updates.auto"] === false && install) return false;
-    if (updateCheckInProgress) return false;
+    if (install && settings["updates.auto"] === false) return false;
+    if (updateCheckInProgress || updateInstalling) return false;
 
     updateCheckInProgress = true;
     try {
         const local = getLocalUpdateInfo();
-        const remote = await githubAutoUpdateInfo();
-        const remoteBuild = String(remote.buildId || remote.commit || "");
-        const localBuild = String(local.buildId || "");
+        const cacheBustedUrl = GITHUB_AUTO_UPDATE.metadataUrl + "?t=" + Date.now();
+        const remote = await fetchJson(cacheBustedUrl);
+        const remoteBuild = String(remote.buildId || "").trim();
 
-        if (!remoteBuild || remoteBuild === "unknown" || remoteBuild === localBuild) {
+        if (!remoteBuild) {
+            throw new Error("GitHub update metadata does not contain buildId.");
+        }
+
+        if (remoteBuild === String(local.buildId || "")) {
             return false;
         }
 
-        const downloadUrl = String(remote.downloadUrl || GITHUB_AUTO_UPDATE.downloadUrl);
-        if (!downloadUrl) throw new Error("GitHub update installer URL is missing.");
-
-        const normalizedRemote = {
-            buildId: remoteBuild,
-            sha256: String(remote.sha256 || ""),
-            downloadUrl,
-            packageAsset: GITHUB_AUTO_UPDATE.packageAsset,
-            info: remote
-        };
-
         console.log("[Matrix] GitHub update available:", remoteBuild);
 
-        if (install) {
-            await installGithubUpdate(normalizedRemote);
-            return true;
-        }
+        if (!install) return remote;
 
-        return normalizedRemote;
+        return await installGithubUpdate(remote);
     } catch (e) {
         console.log("[Matrix] GitHub auto-update check failed:", e.message);
         return false;
@@ -312,7 +289,8 @@ const DEFAULT_SETTINGS = {
     "startup.remote.enabled": false,
     "startup.remote.id": "",
     "updates.auto": true,
-    "updates.checkMinutes": 0.5, // 30 seconds; kept for backwards compatibility with older settings
+    "updates.checkMinutes": 0.5,
+    "updates.checkSeconds": 30,
     // Matrix integrations
     "translation.enabled": false,
     "translation.lang": "pt",
@@ -383,7 +361,6 @@ const DEFAULT_SETTINGS = {
 let gameWin = null;
 let splashWin = null;
 let splashVideoMode = false;
-let openingFinished = false;
 let gameReady = false;
 let rpcModule = null;
 
@@ -450,8 +427,8 @@ function initRPC() {
 function createSplash() {
     const settings = loadSettings();
     splashVideoMode = false;
-    openingFinished = false;
     gameReady = false;
+    openingFinished = false;
     splashWin = new BrowserWindow({
         width: 420,
         height: 240,
@@ -478,22 +455,12 @@ function createSplash() {
     splashWin.loadFile("src/splash/splash.html", { query });
 }
 
+let openingFinished = false;
+
 function closeSplashWhenReady() {
-    if (!gameReady || !openingFinished) return;
-
-    if (splashWin && !splashWin.isDestroyed()) {
-        splashWin.close();
-        splashWin = null;
-    }
-
-    if (gameWin && !gameWin.isDestroyed() && !gameWin.isVisible()) {
-        gameWin.show();
-
-        const settings = loadSettings();
-        if (settings["client.autofullscreen"]) {
-            gameWin.setFullScreen(true);
-        }
-    }
+    if (!gameReady || !openingFinished || !splashWin || splashWin.isDestroyed()) return;
+    splashWin.close();
+    splashWin = null;
 }
 
 
@@ -574,12 +541,17 @@ function createGame() {
 
     gameWin.webContents.on("did-finish-load", () => {
         gameReady = true;
-
-        // The splash/opening owns visibility. The game window is shown only
-        // after the opening has completely finished.
+        // Wait for the startup opening to finish before showing MineFun.
         closeSplashWhenReady();
+        if (!openingFinished) return;
+        gameWin.show();
 
-        // Load Matrix features after MineFun has finished loading.
+        const s = loadSettings();
+        if (s["client.autofullscreen"]) {
+            gameWin.setFullScreen(true);
+        }
+
+        // Load Matrix features only after MineFun is already visible.
         setTimeout(() => {
             inject(gameWin.webContents).catch(e =>
                 console.error("[Matrix] Deferred injection failed:", e.message)
@@ -738,31 +710,20 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
     const minecraftTexturesJs = fs.readFileSync(path.join(__dirname, "../vendor/Minecraft Texture Pack for Minefun.js"), "utf8");
     const customTagMatheusPath = path.join(__dirname, "assets/customtag-matheus.png");
     const customTagCoconutPath = path.join(__dirname, "assets/customtag-coconut.png");
-    const customTagAlexPrimePath = path.join(__dirname, "assets/customtag-alex-prime.png");
     const glitchHunterBadgePath = path.join(__dirname, "assets/badges/glitchhunter.webp");
     const zephronBadgePath = path.join(__dirname, "assets/badges/zephron.webp");
     let customTagMatheusDataUrl = "";
     let customTagCoconutDataUrl = "";
-    let customTagAlexPrimeDataUrl = "";
-    let talkingCatAvatarDataUrl = "";
     let glitchHunterBadgeDataUrl = "";
     let zephronBadgeDataUrl = "";
     try {
         customTagMatheusDataUrl = "data:image/png;base64," + fs.readFileSync(customTagMatheusPath).toString("base64");
         customTagCoconutDataUrl = "data:image/png;base64," + fs.readFileSync(customTagCoconutPath).toString("base64");
-        if (fs.existsSync(customTagAlexPrimePath)) customTagAlexPrimeDataUrl = "data:image/png;base64," + fs.readFileSync(customTagAlexPrimePath).toString("base64");
         if (fs.existsSync(glitchHunterBadgePath)) glitchHunterBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(glitchHunterBadgePath).toString("base64");
         if (fs.existsSync(zephronBadgePath)) zephronBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(zephronBadgePath).toString("base64");
     } catch (e) {
         console.error("[Matrix] Custom tag asset load failed:", e.message);
     }
-    try {
-        talkingCatAvatarDataUrl = await fetchImageDataUrl(THE_TALKING_CAT_AVATAR_URL);
-    } catch (e) {
-        console.log("[Matrix] thetalkingcat avatar unavailable:", e.message);
-        talkingCatAvatarDataUrl = THE_TALKING_CAT_AVATAR_URL;
-    }
-
     const fontPath = path.join(__dirname, "assets/LoveDays.ttf");
     let loveDaysDataUrl = "";
     try {
@@ -775,8 +736,6 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
             loveDaysFont: ${JSON.stringify(loveDaysDataUrl)},
             matheusTag: ${JSON.stringify(customTagMatheusDataUrl)},
             coconutTag: ${JSON.stringify(customTagCoconutDataUrl)},
-            alexPrimeTag: ${JSON.stringify(customTagAlexPrimeDataUrl)},
-            talkingCatTag: ${JSON.stringify(talkingCatAvatarDataUrl)},
             glitchHunterBadge: ${JSON.stringify(glitchHunterBadgeDataUrl)},
             zephronBadge: ${JSON.stringify(zephronBadgeDataUrl)}
         };
@@ -787,12 +746,10 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
     await wc.executeJavaScript(`
         window.__matrixCustomTagAssets = {
             matheus: ${JSON.stringify(customTagMatheusDataUrl)},
-            coconut: ${JSON.stringify(customTagCoconutDataUrl)},
-            alexPrime: ${JSON.stringify(customTagAlexPrimeDataUrl)},
-            talkingcat: ${JSON.stringify(talkingCatAvatarDataUrl)}
+            coconut: ${JSON.stringify(customTagCoconutDataUrl)}
         };
     `);
-    await wc.executeJavaScript(`window.__matrixCustomTagAssets={matheus:${JSON.stringify(customTagMatheusDataUrl)},coconut:${JSON.stringify(customTagCoconutDataUrl)},alexPrime:${JSON.stringify(customTagAlexPrimeDataUrl)},talkingcat:${JSON.stringify(talkingCatAvatarDataUrl)}};window.__matrixBadgeAssets={glitchhunter:${JSON.stringify(glitchHunterBadgeDataUrl)},zephron:${JSON.stringify(zephronBadgeDataUrl)}};`);
+    await wc.executeJavaScript(`window.__matrixCustomTagAssets={matheus:${JSON.stringify(customTagMatheusDataUrl)},coconut:${JSON.stringify(customTagCoconutDataUrl)}};window.__matrixBadgeAssets={glitchhunter:${JSON.stringify(glitchHunterBadgeDataUrl)},zephron:${JSON.stringify(zephronBadgeDataUrl)}};`);
     await wc.executeJavaScript(customTagsJs);
     const advancedModsJs = fs.readFileSync(path.join(__dirname, "features/advanced-mods.js"), "utf8");
     await wc.executeJavaScript(advancedModsJs);
@@ -834,6 +791,16 @@ ipcMain.on("splash-opening-finished", () => {
     splashVideoMode = false;
     openingFinished = true;
     closeSplashWhenReady();
+    if (gameReady && gameWin && !gameWin.isDestroyed() && !gameWin.isVisible()) {
+        gameWin.show();
+        const settings = loadSettings();
+        if (settings["client.autofullscreen"]) gameWin.setFullScreen(true);
+        setTimeout(() => {
+            inject(gameWin.webContents).catch(e =>
+                console.error("[Matrix] Deferred injection failed:", e.message)
+            );
+        }, 250);
+    }
 });
 
 ipcMain.handle("restart-client", () => {
@@ -1091,10 +1058,10 @@ app.whenReady().then(() => {
     }, 7000);
 
     setInterval(() => {
-        if (gameWin && !gameWin.isDestroyed()) {
+        if (gameWin && !gameWin.isDestroyed() && !updateInstalling) {
             checkForUpdates().catch(() => {});
         }
-    }, 30 * 1000);
+    }, GITHUB_AUTO_UPDATE.checkIntervalMs);
 
     createSplash();
 
