@@ -8,9 +8,14 @@
       className: "matrix-tag-matheus"
     },
     "thetalkingcat": {
-      image: () => window.__matrixCustomTagAssets?.coconut,
-      text: "SHIT",
+      image: () => window.__matrixCustomTagAssets?.talkingcat,
+      text: "",
       className: "matrix-tag-talkingcat"
+    },
+    "Xx_lexzin_xX": {
+      image: () => window.__matrixCustomTagAssets?.alexPrime,
+      text: "",
+      className: "matrix-tag-alex-prime"
     },
     "GlitchHunter": {
       image: () => window.__matrixBadgeAssets?.glitchhunter || window.__matrixCustomTagAssets?.coconut,
