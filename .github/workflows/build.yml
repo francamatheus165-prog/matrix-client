@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - master
-
   workflow_dispatch:
 
 permissions:
@@ -16,9 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_NAME: Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES
   RELEASE_TAG: matrix-auto
   RELEASE_NAME: Matrix Client — Automatic Build
+  INSTALLER_NAME: Matrix-Client-MathPRIME-Setup.exe
 
 jobs:
   build-windows:
@@ -26,8 +25,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
+
       # ============================================================
-      # 1. BAIXAR O CÓDIGO DO REPOSITÓRIO
+      # 1. BAIXAR O PROJETO
       # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -51,28 +51,7 @@ jobs:
         run: npm install
 
       # ============================================================
-      # 4. MOSTRAR INFORMAÇÕES DA BUILD
-      # ============================================================
-      - name: Show build information
-        shell: pwsh
-        run: |
-          Write-Host "=========================================="
-          Write-Host " MATRIX CLIENT — MATHPRIME"
-          Write-Host "=========================================="
-          Write-Host ""
-          Write-Host "Repository:"
-          Write-Host "francamatheus165-prog/matrix-client"
-          Write-Host ""
-          Write-Host "Commit:"
-          Write-Host "${{ github.sha }}"
-          Write-Host ""
-          Write-Host "Run:"
-          Write-Host "${{ github.run_number }}"
-          Write-Host ""
-          Write-Host "=========================================="
-
-      # ============================================================
-      # 5. GERAR INFORMAÇÃO DA BUILD DENTRO DO CLIENT
+      # 4. INFORMAÇÕES DA BUILD
       # ============================================================
       - name: Create build information
         shell: pwsh
@@ -83,8 +62,8 @@ jobs:
             commit = "${{ github.sha }}"
             buildId = "${{ github.sha }}"
             runNumber = "${{ github.run_number }}"
-            generatedAt = (Get-Date).ToUniversalTime().ToString("o")
             channel = "github-auto"
+            generatedAt = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json -Depth 5
 
           Set-Content `
@@ -93,35 +72,38 @@ jobs:
             -Encoding UTF8
 
       # ============================================================
-      # 6. GARANTIR QUE OS ASSETS DO CLIENT EXISTEM
+      # 5. VERIFICAR A IMAGEM/ASSETS DO MATRIX CLIENT
       # ============================================================
       - name: Verify Matrix Client assets
         shell: pwsh
         run: |
-          $required = @(
-            "src/assets/icon.png",
-            "src/assets/customtag-matheus.png",
-            "src/assets/customtag-coconut.png",
-            "src/assets/matrix-custom-opening.webm"
-          )
-
-          foreach ($file in $required) {
-            if (!(Test-Path $file)) {
-              Write-Error "Arquivo obrigatório não encontrado: $file"
-              exit 1
-            }
-
-            Write-Host "OK: $file"
+          if (!(Test-Path "src/assets/icon.png")) {
+            Write-Error "src/assets/icon.png não encontrado."
+            exit 1
           }
 
-      # ============================================================
-      # 7. BUILD DO ELECTRON
-      # ============================================================
-      - name: Build Matrix Client
-        run: npm run build
+          Write-Host "OK: imagem principal encontrada."
 
       # ============================================================
-      # 8. LOCALIZAR O INSTALADOR NSIS
+      # 6. LIMPAR BUILD ANTERIOR
+      # ============================================================
+      - name: Clean dist
+        shell: pwsh
+        run: |
+          if (Test-Path "dist") {
+            Remove-Item "dist" -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path "dist" | Out-Null
+
+      # ============================================================
+      # 7. GERAR SOMENTE O INSTALADOR WINDOWS NSIS
+      # ============================================================
+      - name: Build Matrix Client installer
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      # ============================================================
+      # 8. ENCONTRAR O EXE
       # ============================================================
       - name: Find installer
         shell: pwsh
@@ -134,10 +116,12 @@ jobs:
               $_.Name -notmatch "unins" -and
               $_.Name -notmatch "setup-blockmap"
             } |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
           if ($null -eq $installer) {
-            Write-Error "Nenhum instalador .exe foi encontrado dentro de dist."
+            Write-Error "Nenhum instalador .exe foi encontrado."
+            Get-ChildItem "dist" -Recurse | Select-Object FullName
             exit 1
           }
 
@@ -146,45 +130,36 @@ jobs:
 
           Copy-Item `
             $installer.FullName `
-            "Matrix-Client-MathPRIME-Setup.exe" `
+            $env:INSTALLER_NAME `
             -Force
 
       # ============================================================
-      # 9. VERIFICAR O EXE
+      # 9. VERIFICAR O EXE FINAL
       # ============================================================
-      - name: Verify installer
+      - name: Verify final EXE
         shell: pwsh
         run: |
-          if (!(Test-Path "Matrix-Client-MathPRIME-Setup.exe")) {
-            Write-Error "O instalador final não foi criado."
+          if (!(Test-Path $env:INSTALLER_NAME)) {
+            Write-Error "O EXE final não existe."
             exit 1
           }
 
-          $file = Get-Item "Matrix-Client-MathPRIME-Setup.exe"
+          $file = Get-Item $env:INSTALLER_NAME
 
           Write-Host "=========================================="
-          Write-Host " INSTALADOR FINAL"
+          Write-Host " MATRIX CLIENT"
           Write-Host "=========================================="
-          Write-Host "Nome: $($file.Name)"
-          Write-Host "Tamanho: $($file.Length) bytes"
+          Write-Host "Arquivo:"
+          Write-Host $file.Name
+          Write-Host ""
+          Write-Host "Tamanho:"
+          Write-Host "$($file.Length) bytes"
           Write-Host "=========================================="
 
       # ============================================================
-      # 10. ARTIFACT DO GITHUB
-      # SOMENTE O EXE
+      # 10. CRIAR/ATUALIZAR RELEASE
       # ============================================================
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Matrix-Client-MathPRIME-Windows
-          path: Matrix-Client-MathPRIME-Setup.exe
-          if-no-files-found: error
-          retention-days: 30
-
-      # ============================================================
-      # 11. CRIAR/ATUALIZAR RELEASE AUTOMÁTICA
-      # ============================================================
-      - name: Create or update automatic release
+      - name: Create or update release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -192,42 +167,64 @@ jobs:
           gh release view $env:RELEASE_TAG *> $null
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Criando Release automática..."
+            Write-Host "Criando Release..."
 
             gh release create $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client build from commit ${{ github.sha }}" `
+              --notes "Automatic Matrix Client Windows build." `
               --prerelease `
               --target "${{ github.sha }}"
           }
           else {
-            Write-Host "Atualizando Release automática..."
+            Write-Host "Atualizando Release..."
 
             gh release edit $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client build from commit ${{ github.sha }}" `
+              --notes "Automatic Matrix Client Windows build. Commit: ${{ github.sha }}" `
               --prerelease `
               --target "${{ github.sha }}"
+          }
+
+      # ============================================================
+      # 11. REMOVER ARQUIVOS ANTIGOS DA RELEASE
+      # ============================================================
+      - name: Remove old release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = gh release view $env:RELEASE_TAG `
+            --json assets `
+            --jq '.assets[].name'
+
+          foreach ($asset in $assets) {
+            if ($asset -ne $env:INSTALLER_NAME) {
+              Write-Host "Removendo arquivo antigo: $asset"
+
+              gh release delete-asset `
+                $env:RELEASE_TAG `
+                $asset `
+                --yes
+            }
           }
 
       # ============================================================
       # 12. PUBLICAR SOMENTE O EXE
       # ============================================================
-      - name: Publish Matrix Client installer
+      - name: Publish only EXE
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload `
             $env:RELEASE_TAG `
-            Matrix-Client-MathPRIME-Setup.exe `
+            $env:INSTALLER_NAME `
             --clobber
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host " MATRIX CLIENT PUBLICADO COM SUCESSO"
+          Write-Host " MATRIX CLIENT PUBLICADO"
           Write-Host "=========================================="
           Write-Host ""
-          Write-Host "Release: $env:RELEASE_TAG"
-          Write-Host "Arquivo: Matrix-Client-MathPRIME-Setup.exe"
-          Write-Host ""
+          Write-Host "Somente este arquivo foi publicado:"
+          Write-Host $env:INSTALLER_NAME
