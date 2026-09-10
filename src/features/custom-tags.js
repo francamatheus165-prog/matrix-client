@@ -15,7 +15,7 @@
     "Xx_lexzin_xX": {
       image: () => window.__matrixCustomTagAssets?.alexPrime,
       text: "",
-      className: "matrix-tag-alex-prime"
+      className: "matrix-tag-matheus"
     },
     "GlitchHunter": {
       image: () => window.__matrixBadgeAssets?.glitchhunter || window.__matrixCustomTagAssets?.coconut,
