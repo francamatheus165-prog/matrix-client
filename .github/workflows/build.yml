@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - master
+    paths-ignore:
+      - "src/update-info.json"
   workflow_dispatch:
 
 permissions:
@@ -18,6 +20,8 @@ env:
   RELEASE_TAG: matrix-auto
   RELEASE_NAME: Matrix Client — Automatic Build
   INSTALLER_NAME: Matrix-Client-MathPRIME-Setup.exe
+  UPDATE_INFO_PATH: src/update-info.json
+  UPDATE_DOWNLOAD_URL: https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe
 
 jobs:
   build-windows:
@@ -40,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Create build information
+      - name: Create local build information
         shell: pwsh
         run: |
           $buildInfo = @{
@@ -53,13 +57,13 @@ jobs:
             generatedAt = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json -Depth 5
 
-          Set-Content -Path "src/update-info.json" -Value $buildInfo -Encoding UTF8
+          Set-Content -Path $env:UPDATE_INFO_PATH -Value $buildInfo -Encoding UTF8
 
       - name: Verify Matrix Client icon
         shell: pwsh
         run: |
           if (!(Test-Path "src/assets/icon.png")) {
-            Write-Error "src/assets/icon.png não encontrado."
+            Write-Error "src/assets/icon.png not found."
             exit 1
           }
 
@@ -85,7 +89,7 @@ jobs:
             Select-Object -First 1
 
           if ($null -eq $installer) {
-            Write-Error "Nenhum instalador .exe foi encontrado em dist."
+            Write-Error "No Windows installer .exe was found in dist."
             Get-ChildItem "dist" -Recurse | Select-Object FullName
             exit 1
           }
@@ -97,7 +101,7 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path $env:INSTALLER_NAME)) {
-            Write-Error "O instalador final não existe."
+            Write-Error "Final installer does not exist."
             exit 1
           }
 
@@ -146,3 +150,43 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload $env:RELEASE_TAG $env:INSTALLER_NAME --clobber
+
+      - name: Create latest update information
+        shell: pwsh
+        run: |
+          $sha256 = (Get-FileHash $env:INSTALLER_NAME -Algorithm SHA256).Hash.ToLower()
+
+          $buildInfo = @{ 
+            repository = "francamatheus165-prog/matrix-client"
+            branch = "${{ github.ref_name }}"
+            commit = "${{ github.sha }}"
+            buildId = "${{ github.sha }}"
+            runNumber = "${{ github.run_number }}"
+            version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            channel = "github-auto"
+            packageName = $env:INSTALLER_NAME
+            downloadUrl = $env:UPDATE_DOWNLOAD_URL
+            sha256 = $sha256
+            generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+          } | ConvertTo-Json -Depth 5
+
+          Set-Content -Path $env:UPDATE_INFO_PATH -Value $buildInfo -Encoding UTF8
+
+      - name: Publish update information to GitHub
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add $env:UPDATE_INFO_PATH
+
+          $changed = git diff --cached --name-only
+          if ($changed) {
+            git commit -m "chore: update Matrix Client build info [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          }
+          else {
+            Write-Host "No update-info changes to commit."
+          }
