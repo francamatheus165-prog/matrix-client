@@ -18,11 +18,14 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=256");
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 
 const UPDATE_INFO_FILE = path.join(__dirname, "update-info.json");
+const THE_TALKING_CAT_AVATAR_URL = "https://avatars.githubusercontent.com/u/266412468?s=60&v=4";
+
 const GITHUB_AUTO_UPDATE = {
     owner: "francamatheus165-prog",
     repo: "matrix-client",
     tag: "matrix-auto",
     packageAsset: "Matrix-Client-MathPRIME-Setup.exe",
+    downloadUrl: "https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe",
 };
 
 function getLocalUpdateInfo() {
@@ -33,52 +36,101 @@ function getLocalUpdateInfo() {
     }
 }
 
-function githubApiJson(url) {
+function githubRawJson(url, timeoutMs = 10000) {
     const https = require("https");
     return new Promise((resolve, reject) => {
-        const req = https.get(url, {
+        let settled = false;
+        const finish = (err, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (err) reject(err); else resolve(value);
+        };
+
+        const cacheBust = (url.includes("?") ? "&" : "?") + "matrix_client=" + Date.now();
+        const request = https.get(url + cacheBust, {
             headers: {
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "Matrix-Client-MathPRIME",
-                "X-GitHub-Api-Version": "2026-03-10",
+                "Accept": "application/json,text/plain,*/*",
+                "User-Agent": "Matrix-Client-MathPRIME"
             }
-        }, res => {
+        }, response => {
+            if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
+                response.resume();
+                return githubRawJson(response.headers.location, timeoutMs).then(v => finish(null, v), e => finish(e));
+            }
+            if (response.statusCode !== 200) {
+                response.resume();
+                return finish(new Error("GitHub update-info HTTP " + response.statusCode));
+            }
             const chunks = [];
-            res.on("data", c => chunks.push(c));
-            res.on("end", () => {
-                const raw = Buffer.concat(chunks).toString("utf8");
-                let data;
-                try { data = JSON.parse(raw); } catch (_) {
-                    return reject(new Error("Invalid GitHub response."));
+            response.on("data", c => chunks.push(c));
+            response.on("end", () => {
+                try {
+                    finish(null, JSON.parse(Buffer.concat(chunks).toString("utf8")));
+                } catch (_) {
+                    finish(new Error("Invalid GitHub update-info response."));
                 }
-                if (res.statusCode !== 200) {
-                    return reject(new Error(data?.message || ("GitHub HTTP " + res.statusCode)));
-                }
-                resolve(data);
             });
+            response.on("error", finish);
         });
-        req.on("error", reject);
+        request.on("error", finish);
+        const timer = setTimeout(() => {
+            request.destroy();
+            finish(new Error("GitHub update-info request timed out."));
+        }, timeoutMs);
     });
 }
 
-function githubAutoRelease() {
-    const url =
-        "https://api.github.com/repos/" +
-        encodeURIComponent(GITHUB_AUTO_UPDATE.owner) + "/" +
-        encodeURIComponent(GITHUB_AUTO_UPDATE.repo) + "/releases/tags/" +
-        encodeURIComponent(GITHUB_AUTO_UPDATE.tag);
+function fetchImageDataUrl(url, timeoutMs = 12000) {
+    const https = require("https");
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (err, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (err) reject(err); else resolve(value);
+        };
 
-    return githubApiJson(url).then(release => {
-        const packageAsset = (release.assets || []).find(
-            a => a.name === GITHUB_AUTO_UPDATE.packageAsset
-        );
+        const request = https.get(url, {
+            headers: {
+                "User-Agent": "Matrix-Client-MathPRIME",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/png,image/*,*/*;q=0.8"
+            }
+        }, response => {
+            if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
+                response.resume();
+                return fetchImageDataUrl(response.headers.location, timeoutMs).then(v => finish(null, v), e => finish(e));
+            }
 
-        if (!packageAsset) {
-            throw new Error("GitHub auto-update installer is not published yet.");
-        }
+            if (response.statusCode !== 200) {
+                response.resume();
+                return finish(new Error("Image download failed with HTTP " + response.statusCode));
+            }
 
-        return { release, packageAsset };
+            const chunks = [];
+            response.on("data", chunk => chunks.push(chunk));
+            response.on("end", () => {
+                const buffer = Buffer.concat(chunks);
+                const contentType = String(response.headers["content-type"] || "image/png").split(";")[0];
+                finish(null, "data:" + contentType + ";base64," + buffer.toString("base64"));
+            });
+            response.on("error", finish);
+        });
+
+        request.on("error", finish);
+        const timer = setTimeout(() => {
+            request.destroy();
+            finish(new Error("Image download timed out."));
+        }, timeoutMs);
     });
+}
+
+const UPDATE_INFO_RAW_URL =
+    "https://raw.githubusercontent.com/francamatheus165-prog/matrix-client/main/src/update-info.json";
+
+function githubAutoUpdateInfo() {
+    return githubRawJson(UPDATE_INFO_RAW_URL);
 }
 
 function downloadToFile(url, destination) {
@@ -116,12 +168,10 @@ async function installGithubUpdate(remote) {
     fs.mkdirSync(updateDir, { recursive: true });
 
     const installerPath = path.join(updateDir, GITHUB_AUTO_UPDATE.packageAsset);
-    await downloadToFile(remote.packageAsset.browser_download_url, installerPath);
+    await downloadToFile(remote.downloadUrl, installerPath);
 
-    // Verify the download when GitHub provides a SHA-256 digest for the release asset.
-    const digest = String(remote.packageAsset.digest || "");
-    if (digest.startsWith("sha256:")) {
-        const expected = digest.slice("sha256:".length).toLowerCase();
+    const expected = String(remote.sha256 || "").toLowerCase();
+    if (expected) {
         const actual = crypto
             .createHash("sha256")
             .update(fs.readFileSync(installerPath))
@@ -139,11 +189,12 @@ async function installGithubUpdate(remote) {
     const script = `
 $ErrorActionPreference = 'Stop'
 $installer = '${escaped(installerPath)}'
+$appExe = '${escaped(app.getPath("exe"))}'
 Start-Sleep -Seconds 2
 if (-not (Test-Path $installer)) { throw 'Matrix Client installer not found.' }
 Start-Process -FilePath $installer -ArgumentList '/S' -Wait
 Remove-Item '${escaped(updateDir)}' -Recurse -Force -ErrorAction SilentlyContinue
-Start-Process -FilePath '${escaped(process.execPath)}'
+if (Test-Path $appExe) { Start-Process -FilePath $appExe }
 `;
 
     fs.writeFileSync(scriptPath, script, "utf8");
@@ -170,23 +221,48 @@ Start-Process -FilePath '${escaped(process.execPath)}'
     return true;
 }
 
+let updateCheckInProgress = false;
+
 async function checkGithubAutoUpdate({ install = true } = {}) {
     const settings = loadSettings();
     if (settings["updates.auto"] === false && install) return false;
+    if (updateCheckInProgress) return false;
+
+    updateCheckInProgress = true;
     try {
         const local = getLocalUpdateInfo();
-        const remote = await githubAutoRelease();
-        const remoteBuild = String(remote.release.target_commitish || remote.release.published_at || remote.packageAsset.updated_at || "");
-        if (!remoteBuild || remoteBuild === String(local.buildId || "")) return false;
+        const remote = await githubAutoUpdateInfo();
+        const remoteBuild = String(remote.buildId || remote.commit || "");
+        const localBuild = String(local.buildId || "");
+
+        if (!remoteBuild || remoteBuild === "unknown" || remoteBuild === localBuild) {
+            return false;
+        }
+
+        const downloadUrl = String(remote.downloadUrl || GITHUB_AUTO_UPDATE.downloadUrl);
+        if (!downloadUrl) throw new Error("GitHub update installer URL is missing.");
+
+        const normalizedRemote = {
+            buildId: remoteBuild,
+            sha256: String(remote.sha256 || ""),
+            downloadUrl,
+            packageAsset: GITHUB_AUTO_UPDATE.packageAsset,
+            info: remote
+        };
+
         console.log("[Matrix] GitHub update available:", remoteBuild);
+
         if (install) {
-            await installGithubUpdate(remote);
+            await installGithubUpdate(normalizedRemote);
             return true;
         }
-        return remote;
+
+        return normalizedRemote;
     } catch (e) {
         console.log("[Matrix] GitHub auto-update check failed:", e.message);
         return false;
+    } finally {
+        updateCheckInProgress = false;
     }
 }
 
@@ -236,7 +312,7 @@ const DEFAULT_SETTINGS = {
     "startup.remote.enabled": false,
     "startup.remote.id": "",
     "updates.auto": true,
-    "updates.checkMinutes": 30,
+    "updates.checkMinutes": 0.5, // 30 seconds; kept for backwards compatibility with older settings
     // Matrix integrations
     "translation.enabled": false,
     "translation.lang": "pt",
@@ -662,20 +738,31 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
     const minecraftTexturesJs = fs.readFileSync(path.join(__dirname, "../vendor/Minecraft Texture Pack for Minefun.js"), "utf8");
     const customTagMatheusPath = path.join(__dirname, "assets/customtag-matheus.png");
     const customTagCoconutPath = path.join(__dirname, "assets/customtag-coconut.png");
+    const customTagAlexPrimePath = path.join(__dirname, "assets/customtag-alex-prime.png");
     const glitchHunterBadgePath = path.join(__dirname, "assets/badges/glitchhunter.webp");
     const zephronBadgePath = path.join(__dirname, "assets/badges/zephron.webp");
     let customTagMatheusDataUrl = "";
     let customTagCoconutDataUrl = "";
+    let customTagAlexPrimeDataUrl = "";
+    let talkingCatAvatarDataUrl = "";
     let glitchHunterBadgeDataUrl = "";
     let zephronBadgeDataUrl = "";
     try {
         customTagMatheusDataUrl = "data:image/png;base64," + fs.readFileSync(customTagMatheusPath).toString("base64");
         customTagCoconutDataUrl = "data:image/png;base64," + fs.readFileSync(customTagCoconutPath).toString("base64");
+        if (fs.existsSync(customTagAlexPrimePath)) customTagAlexPrimeDataUrl = "data:image/png;base64," + fs.readFileSync(customTagAlexPrimePath).toString("base64");
         if (fs.existsSync(glitchHunterBadgePath)) glitchHunterBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(glitchHunterBadgePath).toString("base64");
         if (fs.existsSync(zephronBadgePath)) zephronBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(zephronBadgePath).toString("base64");
     } catch (e) {
         console.error("[Matrix] Custom tag asset load failed:", e.message);
     }
+    try {
+        talkingCatAvatarDataUrl = await fetchImageDataUrl(THE_TALKING_CAT_AVATAR_URL);
+    } catch (e) {
+        console.log("[Matrix] thetalkingcat avatar unavailable:", e.message);
+        talkingCatAvatarDataUrl = THE_TALKING_CAT_AVATAR_URL;
+    }
+
     const fontPath = path.join(__dirname, "assets/LoveDays.ttf");
     let loveDaysDataUrl = "";
     try {
@@ -688,6 +775,8 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
             loveDaysFont: ${JSON.stringify(loveDaysDataUrl)},
             matheusTag: ${JSON.stringify(customTagMatheusDataUrl)},
             coconutTag: ${JSON.stringify(customTagCoconutDataUrl)},
+            alexPrimeTag: ${JSON.stringify(customTagAlexPrimeDataUrl)},
+            talkingCatTag: ${JSON.stringify(talkingCatAvatarDataUrl)},
             glitchHunterBadge: ${JSON.stringify(glitchHunterBadgeDataUrl)},
             zephronBadge: ${JSON.stringify(zephronBadgeDataUrl)}
         };
@@ -698,10 +787,12 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
     await wc.executeJavaScript(`
         window.__matrixCustomTagAssets = {
             matheus: ${JSON.stringify(customTagMatheusDataUrl)},
-            coconut: ${JSON.stringify(customTagCoconutDataUrl)}
+            coconut: ${JSON.stringify(customTagCoconutDataUrl)},
+            alexPrime: ${JSON.stringify(customTagAlexPrimeDataUrl)},
+            talkingcat: ${JSON.stringify(talkingCatAvatarDataUrl)}
         };
     `);
-    await wc.executeJavaScript(`window.__matrixCustomTagAssets={matheus:${JSON.stringify(customTagMatheusDataUrl)},coconut:${JSON.stringify(customTagCoconutDataUrl)}};window.__matrixBadgeAssets={glitchhunter:${JSON.stringify(glitchHunterBadgeDataUrl)},zephron:${JSON.stringify(zephronBadgeDataUrl)}};`);
+    await wc.executeJavaScript(`window.__matrixCustomTagAssets={matheus:${JSON.stringify(customTagMatheusDataUrl)},coconut:${JSON.stringify(customTagCoconutDataUrl)},alexPrime:${JSON.stringify(customTagAlexPrimeDataUrl)},talkingcat:${JSON.stringify(talkingCatAvatarDataUrl)}};window.__matrixBadgeAssets={glitchhunter:${JSON.stringify(glitchHunterBadgeDataUrl)},zephron:${JSON.stringify(zephronBadgeDataUrl)}};`);
     await wc.executeJavaScript(customTagsJs);
     const advancedModsJs = fs.readFileSync(path.join(__dirname, "features/advanced-mods.js"), "utf8");
     await wc.executeJavaScript(advancedModsJs);
@@ -1003,7 +1094,7 @@ app.whenReady().then(() => {
         if (gameWin && !gameWin.isDestroyed()) {
             checkForUpdates().catch(() => {});
         }
-    }, 30 * 60 * 1000);
+    }, 30 * 1000);
 
     createSplash();
 
