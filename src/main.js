@@ -22,8 +22,7 @@ const GITHUB_AUTO_UPDATE = {
     owner: "francamatheus165-prog",
     repo: "matrix-client",
     tag: "matrix-auto",
-    manifestAsset: "matrix-manifest.json",
-    packageAsset: "Matrix-Client-MathPRIME-v1.3.4-ADVANCED-MODS-TEXTURES-BADGES.zip",
+    packageAsset: "Matrix-Client-MathPRIME-Setup.exe",
 };
 
 function getLocalUpdateInfo() {
@@ -62,20 +61,23 @@ function githubApiJson(url) {
     });
 }
 
-function githubAutoManifest() {
+function githubAutoRelease() {
     const url =
         "https://api.github.com/repos/" +
         encodeURIComponent(GITHUB_AUTO_UPDATE.owner) + "/" +
         encodeURIComponent(GITHUB_AUTO_UPDATE.repo) + "/releases/tags/" +
         encodeURIComponent(GITHUB_AUTO_UPDATE.tag);
-    return githubApiJson(url).then(async release => {
-        const manifestAsset = (release.assets || []).find(a => a.name === GITHUB_AUTO_UPDATE.manifestAsset);
-        const packageAsset = (release.assets || []).find(a => a.name === GITHUB_AUTO_UPDATE.packageAsset);
-        if (!manifestAsset || !packageAsset) {
-            throw new Error("GitHub auto-update assets are not published yet.");
+
+    return githubApiJson(url).then(release => {
+        const packageAsset = (release.assets || []).find(
+            a => a.name === GITHUB_AUTO_UPDATE.packageAsset
+        );
+
+        if (!packageAsset) {
+            throw new Error("GitHub auto-update installer is not published yet.");
         }
-        const manifest = await githubApiJson(manifestAsset.browser_download_url);
-        return { release, manifest, packageAsset };
+
+        return { release, packageAsset };
     });
 }
 
@@ -105,7 +107,6 @@ function downloadToFile(url, destination) {
 
 async function installGithubUpdate(remote) {
     const fs = require("fs");
-    const path = require("path");
     const os = require("os");
     const crypto = require("crypto");
     const { spawn } = require("child_process");
@@ -114,43 +115,57 @@ async function installGithubUpdate(remote) {
     fs.rmSync(updateDir, { recursive: true, force: true });
     fs.mkdirSync(updateDir, { recursive: true });
 
-    const zipPath = path.join(updateDir, GITHUB_AUTO_UPDATE.packageAsset);
-    const hash = crypto.createHash("sha256");
-    const expected = String(remote.manifest.sha256 || "").toLowerCase();
-    if (!expected) throw new Error("GitHub manifest does not contain SHA-256.");
+    const installerPath = path.join(updateDir, GITHUB_AUTO_UPDATE.packageAsset);
+    await downloadToFile(remote.packageAsset.browser_download_url, installerPath);
 
-    await downloadToFile(remote.packageAsset.browser_download_url, zipPath);
-    const fileBuffer = fs.readFileSync(zipPath);
-    const actual = crypto.createHash("sha256").update(fileBuffer).digest("hex").toLowerCase();
-    if (actual !== expected) throw new Error("GitHub update SHA-256 verification failed.");
+    // Verify the download when GitHub provides a SHA-256 digest for the release asset.
+    const digest = String(remote.packageAsset.digest || "");
+    if (digest.startsWith("sha256:")) {
+        const expected = digest.slice("sha256:".length).toLowerCase();
+        const actual = crypto
+            .createHash("sha256")
+            .update(fs.readFileSync(installerPath))
+            .digest("hex")
+            .toLowerCase();
 
-    const installDir = path.dirname(app.getPath("exe"));
-    const extractDir = path.join(updateDir, "package");
+        if (actual !== expected) {
+            throw new Error("GitHub update SHA-256 verification failed.");
+        }
+    }
+
     const scriptPath = path.join(updateDir, "apply-update.ps1");
     const escaped = value => String(value).replace(/'/g, "''");
+
     const script = `
 $ErrorActionPreference = 'Stop'
-$zip = '${escaped(zipPath)}'
-$extract = '${escaped(extractDir)}'
-$target = '${escaped(installDir)}'
-$exe = '${escaped(app.getPath("exe"))}'
+$installer = '${escaped(installerPath)}'
 Start-Sleep -Seconds 2
-if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
-Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-$payload = Get-ChildItem -LiteralPath $extract -Force
-$root = if ($payload.Count -eq 1 -and $payload[0].PSIsContainer) { $payload[0].FullName } else { $extract }
-Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
-    Copy-Item $_.FullName -Destination (Join-Path $target $_.Name) -Recurse -Force
-}
-Remove-Item $updateDir -Recurse -Force -ErrorAction SilentlyContinue
-Start-Process -FilePath $exe
+if (-not (Test-Path $installer)) { throw 'Matrix Client installer not found.' }
+Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+Remove-Item '${escaped(updateDir)}' -Recurse -Force -ErrorAction SilentlyContinue
+Start-Process -FilePath '${escaped(process.execPath)}'
 `;
+
     fs.writeFileSync(scriptPath, script, "utf8");
-    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true
-    }).unref();
+
+    spawn(
+        "powershell.exe",
+        [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            scriptPath
+        ],
+        {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true
+        }
+    ).unref();
+
     app.quit();
     return true;
 }
@@ -160,8 +175,8 @@ async function checkGithubAutoUpdate({ install = true } = {}) {
     if (settings["updates.auto"] === false && install) return false;
     try {
         const local = getLocalUpdateInfo();
-        const remote = await githubAutoManifest();
-        const remoteBuild = String(remote.manifest.buildId || remote.release.target_commitish || "");
+        const remote = await githubAutoRelease();
+        const remoteBuild = String(remote.release.target_commitish || remote.release.published_at || remote.packageAsset.updated_at || "");
         if (!remoteBuild || remoteBuild === String(local.buildId || "")) return false;
         console.log("[Matrix] GitHub update available:", remoteBuild);
         if (install) {
@@ -292,6 +307,7 @@ const DEFAULT_SETTINGS = {
 let gameWin = null;
 let splashWin = null;
 let splashVideoMode = false;
+let openingFinished = false;
 let gameReady = false;
 let rpcModule = null;
 
@@ -358,6 +374,7 @@ function initRPC() {
 function createSplash() {
     const settings = loadSettings();
     splashVideoMode = false;
+    openingFinished = false;
     gameReady = false;
     splashWin = new BrowserWindow({
         width: 420,
@@ -386,12 +403,20 @@ function createSplash() {
 }
 
 function closeSplashWhenReady() {
-    if (!gameReady || !splashWin || splashWin.isDestroyed()) return;
-    // Custom/video openings own their lifetime: they close when the video ends
-    // (or when the player presses Skip). The normal splash closes as soon as the game is ready.
-    if (!splashVideoMode) {
+    if (!gameReady || !openingFinished) return;
+
+    if (splashWin && !splashWin.isDestroyed()) {
         splashWin.close();
         splashWin = null;
+    }
+
+    if (gameWin && !gameWin.isDestroyed() && !gameWin.isVisible()) {
+        gameWin.show();
+
+        const settings = loadSettings();
+        if (settings["client.autofullscreen"]) {
+            gameWin.setFullScreen(true);
+        }
     }
 }
 
@@ -473,16 +498,12 @@ function createGame() {
 
     gameWin.webContents.on("did-finish-load", () => {
         gameReady = true;
-        // Never block the game window on optional Matrix features.
+
+        // The splash/opening owns visibility. The game window is shown only
+        // after the opening has completely finished.
         closeSplashWhenReady();
-        gameWin.show();
 
-        const s = loadSettings();
-        if (s["client.autofullscreen"]) {
-            gameWin.setFullScreen(true);
-        }
-
-        // Load Matrix features only after MineFun is already visible.
+        // Load Matrix features after MineFun has finished loading.
         setTimeout(() => {
             inject(gameWin.webContents).catch(e =>
                 console.error("[Matrix] Deferred injection failed:", e.message)
@@ -720,6 +741,7 @@ ipcMain.on("splash-opening-mode", (event, mode) => {
 
 ipcMain.on("splash-opening-finished", () => {
     splashVideoMode = false;
+    openingFinished = true;
     closeSplashWhenReady();
 });
 
