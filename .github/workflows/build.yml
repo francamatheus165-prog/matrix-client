@@ -25,18 +25,11 @@ jobs:
     runs-on: windows-latest
 
     steps:
-
-      # ============================================================
-      # 1. BAIXAR O PROJETO
-      # ============================================================
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      # ============================================================
-      # 2. NODE.JS
-      # ============================================================
       - name: Setup Node.js 24
         uses: actions/setup-node@v5
         with:
@@ -44,15 +37,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      # ============================================================
-      # 3. INSTALAR DEPENDÊNCIAS
-      # ============================================================
       - name: Install dependencies
         run: npm install
 
-      # ============================================================
-      # 4. INFORMAÇÕES DA BUILD
-      # ============================================================
       - name: Create build information
         shell: pwsh
         run: |
@@ -66,15 +53,9 @@ jobs:
             generatedAt = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json -Depth 5
 
-          Set-Content `
-            -Path "src/update-info.json" `
-            -Value $buildInfo `
-            -Encoding UTF8
+          Set-Content -Path "src/update-info.json" -Value $buildInfo -Encoding UTF8
 
-      # ============================================================
-      # 5. VERIFICAR A IMAGEM/ASSETS DO MATRIX CLIENT
-      # ============================================================
-      - name: Verify Matrix Client assets
+      - name: Verify Matrix Client icon
         shell: pwsh
         run: |
           if (!(Test-Path "src/assets/icon.png")) {
@@ -82,11 +63,6 @@ jobs:
             exit 1
           }
 
-          Write-Host "OK: imagem principal encontrada."
-
-      # ============================================================
-      # 6. LIMPAR BUILD ANTERIOR
-      # ============================================================
       - name: Clean dist
         shell: pwsh
         run: |
@@ -94,24 +70,13 @@ jobs:
             Remove-Item "dist" -Recurse -Force
           }
 
-          New-Item -ItemType Directory -Path "dist" | Out-Null
-
-      # ============================================================
-      # 7. GERAR SOMENTE O INSTALADOR WINDOWS NSIS
-      # ============================================================
-      - name: Build Matrix Client installer
+      - name: Build Windows installer
         run: npx electron-builder --win nsis --x64 --publish never
 
-      # ============================================================
-      # 8. ENCONTRAR O EXE
-      # ============================================================
       - name: Find installer
         shell: pwsh
         run: |
-          $installer = Get-ChildItem `
-            -Path "dist" `
-            -Filter "*.exe" `
-            -File |
+          $installer = Get-ChildItem -Path "dist" -Filter "*.exe" -File |
             Where-Object {
               $_.Name -notmatch "unins" -and
               $_.Name -notmatch "setup-blockmap"
@@ -120,46 +85,26 @@ jobs:
             Select-Object -First 1
 
           if ($null -eq $installer) {
-            Write-Error "Nenhum instalador .exe foi encontrado."
+            Write-Error "Nenhum instalador .exe foi encontrado em dist."
             Get-ChildItem "dist" -Recurse | Select-Object FullName
             exit 1
           }
 
-          Write-Host "Instalador encontrado:"
-          Write-Host $installer.FullName
+          Copy-Item $installer.FullName $env:INSTALLER_NAME -Force
+          Write-Host "Installer: $env:INSTALLER_NAME"
 
-          Copy-Item `
-            $installer.FullName `
-            $env:INSTALLER_NAME `
-            -Force
-
-      # ============================================================
-      # 9. VERIFICAR O EXE FINAL
-      # ============================================================
       - name: Verify final EXE
         shell: pwsh
         run: |
           if (!(Test-Path $env:INSTALLER_NAME)) {
-            Write-Error "O EXE final não existe."
+            Write-Error "O instalador final não existe."
             exit 1
           }
 
           $file = Get-Item $env:INSTALLER_NAME
+          Write-Host "$($file.Name) - $($file.Length) bytes"
 
-          Write-Host "=========================================="
-          Write-Host " MATRIX CLIENT"
-          Write-Host "=========================================="
-          Write-Host "Arquivo:"
-          Write-Host $file.Name
-          Write-Host ""
-          Write-Host "Tamanho:"
-          Write-Host "$($file.Length) bytes"
-          Write-Host "=========================================="
-
-      # ============================================================
-      # 10. CRIAR/ATUALIZAR RELEASE
-      # ============================================================
-      - name: Create or update release
+      - name: Create or update automatic release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -167,17 +112,13 @@ jobs:
           gh release view $env:RELEASE_TAG *> $null
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Criando Release..."
-
             gh release create $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client Windows build." `
+              --notes "Automatic Matrix Client Windows build. Commit: ${{ github.sha }}" `
               --prerelease `
               --target "${{ github.sha }}"
           }
           else {
-            Write-Host "Atualizando Release..."
-
             gh release edit $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
               --notes "Automatic Matrix Client Windows build. Commit: ${{ github.sha }}" `
@@ -185,46 +126,23 @@ jobs:
               --target "${{ github.sha }}"
           }
 
-      # ============================================================
-      # 11. REMOVER ARQUIVOS ANTIGOS DA RELEASE
-      # ============================================================
       - name: Remove old release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $assets = gh release view $env:RELEASE_TAG `
-            --json assets `
-            --jq '.assets[].name'
+          $assets = gh release view $env:RELEASE_TAG --json assets --jq '.assets[].name'
 
           foreach ($asset in $assets) {
             if ($asset -ne $env:INSTALLER_NAME) {
-              Write-Host "Removendo arquivo antigo: $asset"
-
-              gh release delete-asset `
-                $env:RELEASE_TAG `
-                $asset `
-                --yes
+              Write-Host "Removing old release asset: $asset"
+              gh release delete-asset $env:RELEASE_TAG $asset --yes
             }
           }
 
-      # ============================================================
-      # 12. PUBLICAR SOMENTE O EXE
-      # ============================================================
-      - name: Publish only EXE
+      - name: Publish only the EXE
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload `
-            $env:RELEASE_TAG `
-            $env:INSTALLER_NAME `
-            --clobber
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host " MATRIX CLIENT PUBLICADO"
-          Write-Host "=========================================="
-          Write-Host ""
-          Write-Host "Somente este arquivo foi publicado:"
-          Write-Host $env:INSTALLER_NAME
+          gh release upload $env:RELEASE_TAG $env:INSTALLER_NAME --clobber
