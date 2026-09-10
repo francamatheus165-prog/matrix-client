@@ -1,27 +1,24 @@
-name: Matrix Client — Automatic Windows Build
+name: Matrix Client — GitHub Auto Build
 
 on:
   push:
     branches:
       - main
       - master
-    paths-ignore:
-      - "src/update-info.json"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: matrix-client-build
+  group: matrix-client-auto-build
   cancel-in-progress: true
 
 env:
   RELEASE_TAG: matrix-auto
-  RELEASE_NAME: Matrix Client — Automatic Build
+  RELEASE_NAME: Matrix Client — GitHub Auto Update
   INSTALLER_NAME: Matrix-Client-MathPRIME-Setup.exe
-  UPDATE_INFO_PATH: src/update-info.json
-  UPDATE_DOWNLOAD_URL: https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe
+  UPDATE_BRANCH: updates
 
 jobs:
   build-windows:
@@ -44,28 +41,29 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Create local build information
+      - name: Create build information
         shell: pwsh
         run: |
-          $buildInfo = @{
-            repository = "francamatheus165-prog/matrix-client"
-            branch = "${{ github.ref_name }}"
-            commit = "${{ github.sha }}"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $info = @{
+            version = $pkg.version
             buildId = "${{ github.sha }}"
-            runNumber = "${{ github.run_number }}"
             channel = "github-auto"
+            repository = "francamatheus165-prog/matrix-client"
+            commit = "${{ github.sha }}"
+            runNumber = "${{ github.run_number }}"
             generatedAt = (Get-Date).ToUniversalTime().ToString("o")
           } | ConvertTo-Json -Depth 5
-
-          Set-Content -Path $env:UPDATE_INFO_PATH -Value $buildInfo -Encoding UTF8
+          Set-Content -Path "src/update-info.json" -Value $info -Encoding UTF8
 
       - name: Verify Matrix Client icon
         shell: pwsh
         run: |
           if (!(Test-Path "src/assets/icon.png")) {
-            Write-Error "src/assets/icon.png not found."
+            Write-Error "src/assets/icon.png was not found."
             exit 1
           }
+          Write-Host "Matrix Client icon found."
 
       - name: Clean dist
         shell: pwsh
@@ -74,7 +72,7 @@ jobs:
             Remove-Item "dist" -Recurse -Force
           }
 
-      - name: Build Windows installer
+      - name: Build Windows NSIS installer
         run: npx electron-builder --win nsis --x64 --publish never
 
       - name: Find installer
@@ -89,7 +87,7 @@ jobs:
             Select-Object -First 1
 
           if ($null -eq $installer) {
-            Write-Error "No Windows installer .exe was found in dist."
+            Write-Error "No Windows installer was produced."
             Get-ChildItem "dist" -Recurse | Select-Object FullName
             exit 1
           }
@@ -97,16 +95,12 @@ jobs:
           Copy-Item $installer.FullName $env:INSTALLER_NAME -Force
           Write-Host "Installer: $env:INSTALLER_NAME"
 
-      - name: Verify final EXE
+      - name: Calculate installer SHA-256
         shell: pwsh
         run: |
-          if (!(Test-Path $env:INSTALLER_NAME)) {
-            Write-Error "Final installer does not exist."
-            exit 1
-          }
-
-          $file = Get-Item $env:INSTALLER_NAME
-          Write-Host "$($file.Name) - $($file.Length) bytes"
+          $hash = (Get-FileHash $env:INSTALLER_NAME -Algorithm SHA256).Hash.ToLower()
+          "INSTALLER_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA-256: $hash"
 
       - name: Create or update automatic release
         shell: pwsh
@@ -118,14 +112,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client Windows build. Commit: ${{ github.sha }}" `
+              --notes "Automatic Matrix Client Windows build from commit ${{ github.sha }}." `
               --prerelease `
               --target "${{ github.sha }}"
           }
           else {
             gh release edit $env:RELEASE_TAG `
               --title $env:RELEASE_NAME `
-              --notes "Automatic Matrix Client Windows build. Commit: ${{ github.sha }}" `
+              --notes "Automatic Matrix Client Windows build from commit ${{ github.sha }}." `
               --prerelease `
               --target "${{ github.sha }}"
           }
@@ -136,43 +130,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = gh release view $env:RELEASE_TAG --json assets --jq '.assets[].name'
-
           foreach ($asset in $assets) {
-            if ($asset -ne $env:INSTALLER_NAME) {
-              Write-Host "Removing old release asset: $asset"
-              gh release delete-asset $env:RELEASE_TAG $asset --yes
-            }
+            gh release delete-asset $env:RELEASE_TAG $asset --yes
           }
 
-      - name: Publish only the EXE
+      - name: Publish ONLY the EXE
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload $env:RELEASE_TAG $env:INSTALLER_NAME --clobber
+          gh release upload `
+            $env:RELEASE_TAG `
+            $env:INSTALLER_NAME `
+            --clobber
 
-      - name: Create latest update information
-        shell: pwsh
-        run: |
-          $sha256 = (Get-FileHash $env:INSTALLER_NAME -Algorithm SHA256).Hash.ToLower()
-
-          $buildInfo = @{ 
-            repository = "francamatheus165-prog/matrix-client"
-            branch = "${{ github.ref_name }}"
-            commit = "${{ github.sha }}"
-            buildId = "${{ github.sha }}"
-            runNumber = "${{ github.run_number }}"
-            version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-            channel = "github-auto"
-            packageName = $env:INSTALLER_NAME
-            downloadUrl = $env:UPDATE_DOWNLOAD_URL
-            sha256 = $sha256
-            generatedAt = (Get-Date).ToUniversalTime().ToString("o")
-          } | ConvertTo-Json -Depth 5
-
-          Set-Content -Path $env:UPDATE_INFO_PATH -Value $buildInfo -Encoding UTF8
-
-      - name: Publish update information to GitHub
+      - name: Publish update metadata to updates branch
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -180,13 +152,35 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add $env:UPDATE_INFO_PATH
+          $metadata = @{
+            version = ((Get-Content package.json -Raw | ConvertFrom-Json).version)
+            buildId = "${{ github.sha }}"
+            commit = "${{ github.sha }}"
+            runNumber = "${{ github.run_number }}"
+            repository = "francamatheus165-prog/matrix-client"
+            channel = "github-auto"
+            installerName = $env:INSTALLER_NAME
+            installerUrl = "https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/$env:INSTALLER_NAME"
+            sha256 = $env:INSTALLER_SHA256
+            generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+          } | ConvertTo-Json -Depth 5
 
-          $changed = git diff --cached --name-only
-          if ($changed) {
-            git commit -m "chore: update Matrix Client build info [skip ci]"
-            git push origin "HEAD:${{ github.ref_name }}"
+          Set-Content -Path "latest.json" -Value $metadata -Encoding UTF8
+
+          git fetch origin "$env:UPDATE_BRANCH" 2>$null
+
+          if ($LASTEXITCODE -eq 0) {
+            git switch --force-create "$env:UPDATE_BRANCH" "origin/$env:UPDATE_BRANCH"
+            git rm -rf . 2>$null
           }
           else {
-            Write-Host "No update-info changes to commit."
+            git switch --orphan "$env:UPDATE_BRANCH"
+            git rm -rf . 2>$null
           }
+
+          Set-Content -Path "latest.json" -Value $metadata -Encoding UTF8
+          git add latest.json
+          git commit -m "Update Matrix Client build metadata [skip ci]" 2>$null
+          git push origin "HEAD:$env:UPDATE_BRANCH" --force
+
+          Write-Host "Update metadata published to branch: $env:UPDATE_BRANCH"
