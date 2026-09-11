@@ -1,0 +1,16 @@
+[
+  {
+    "id": "minecraft-glitchhunter",
+    "name": "Minecraft",
+    "creator": "Community",
+    "preview": "assets://texturepacks/minecraft_by_glitchhunter/preview.png",
+    "file": "assets/texturepacks/minecraft_by_glitchhunter/pack.txt"
+  },
+  {
+    "id": "bloxd",
+    "name": "Bloxd",
+    "creator": "Community",
+    "preview": "assets://texturepacks/bloxd/preview.png",
+    "file": "assets/texturepacks/bloxd/pack.txt"
+  }
+]
