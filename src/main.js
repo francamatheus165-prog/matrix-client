@@ -648,66 +648,110 @@ async function inject(wc) {
     const fs = require("fs");
     const settings = loadSettings();
 
-    await wc.executeJavaScript(`
+    // Never let one optional feature crash the entire Matrix menu.
+    async function runPage(label, code) {
+        try {
+            await wc.executeJavaScript(code, true);
+            return true;
+        } catch (error) {
+            console.error(`[Matrix] ${label} failed:`, error?.message || error);
+            return false;
+        }
+    }
+
+    async function runFile(label, filePath) {
+        try {
+            if (!fs.existsSync(filePath)) {
+                console.error(`[Matrix] ${label} file not found: ${filePath}`);
+                return false;
+            }
+            return await runPage(label, fs.readFileSync(filePath, "utf8"));
+        } catch (error) {
+            console.error(`[Matrix] ${label} load failed:`, error?.message || error);
+            return false;
+        }
+    }
+
+    await runPage("settings bootstrap", `
+        window.__mfSettings = window.__mfSettings || {};
         window.__mfSettings.zoom             = ${JSON.stringify(!!settings["zoom.enabled"])};
-        window.__mfSettings.zoomLevel        = ${JSON.stringify(settings["zoom.level"]        ?? 0.35)};
-        window.__mfSettings.zoomKeybind      = ${JSON.stringify(settings["zoom.keybind"]      ?? "KeyV")};
+        window.__mfSettings.zoomLevel        = ${JSON.stringify(settings["zoom.level"] ?? 0.35)};
+        window.__mfSettings.zoomKeybind      = ${JSON.stringify(settings["zoom.keybind"] ?? "KeyV")};
         window.__mfSettings.adblocker        = ${JSON.stringify(!!settings["adblocker.enabled"])};
         window.__mfSettings.crosshair        = ${JSON.stringify(!!settings["crosshair.enabled"])};
-        window.__mfSettings.crosshairURL     = ${JSON.stringify(settings["crosshair.url"]     ?? "")};
-        window.__mfSettings.crosshairSize    = ${JSON.stringify(settings["crosshair.size"]    ?? 32)};
+        window.__mfSettings.crosshairURL     = ${JSON.stringify(settings["crosshair.url"] ?? "")};
+        window.__mfSettings.crosshairSize    = ${JSON.stringify(settings["crosshair.size"] ?? 32)};
         window.__mfSettings.crosshairOpacity = ${JSON.stringify(settings["crosshair.opacity"] ?? 1.0)};
-        window.__mfSettings.textures     = ${JSON.stringify(!!settings["textures.enabled"])};
-window.__mfSettings.texturesPack = ${JSON.stringify(settings["textures.pack"] ?? {})};
-window.__mfSettings.translation        = ${JSON.stringify(!!settings["translation.enabled"])};
-window.__mfSettings.translationLang    = ${JSON.stringify(settings["translation.lang"] ?? "pt")};
-window.__mfSettings.hub                = ${JSON.stringify(!!settings["hub.enabled"])};
-window.__mfSettings.keystrokes          = ${JSON.stringify(!!settings["keystrokes.enabled"])};
-window.__mfSettings.keystrokesShowCPS   = ${JSON.stringify(!!settings["keystrokes.showCPS"])};
-window.__mfSettings.keystrokesShadow    = ${JSON.stringify(!!settings["keystrokes.shadow"])};
-window.__mfSettings.keystrokesBorder    = ${JSON.stringify(!!settings["keystrokes.border"])};
-window.__mfSettings.keystrokesBorderWidth = ${JSON.stringify(settings["keystrokes.borderWidth"] ?? 1)};
-window.__mfSettings.keystrokesBorderColor = ${JSON.stringify(settings["keystrokes.borderColor"] ?? "#ffffff")};
-window.__mfSettings.keystrokesScale     = ${JSON.stringify(settings["keystrokes.scale"] ?? 1.0)};
-window.__mfSettings.keystrokesX         = ${JSON.stringify(settings["keystrokes.x"] ?? 20)};
-window.__mfSettings.keystrokesY         = ${JSON.stringify(settings["keystrokes.y"] ?? 40)};
-window.__mfSettings.keystrokesBg        = ${JSON.stringify(settings["keystrokes.bgColor"] ?? "#00000088")};
-window.__mfSettings.keystrokesBgPress   = ${JSON.stringify(settings["keystrokes.bgPressColor"] ?? "#ffffff")};
-window.__mfSettings.keystrokesText      = ${JSON.stringify(settings["keystrokes.textColor"] ?? "#ffffff")};
-window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.textPressColor"] ?? "#000000")};
+        window.__mfSettings.textures         = ${JSON.stringify(!!settings["textures.enabled"])};
+        window.__mfSettings.texturesPack     = ${JSON.stringify(settings["textures.pack"] ?? {})};
+        window.__mfSettings.translation      = ${JSON.stringify(!!settings["translation.enabled"])};
+        window.__mfSettings.translationLang  = ${JSON.stringify(settings["translation.lang"] ?? "pt")};
+        window.__mfSettings.hub              = ${JSON.stringify(!!settings["hub.enabled"])};
+        window.__mfSettings.keystrokes       = ${JSON.stringify(!!settings["keystrokes.enabled"])};
+        window.__mfSettings.keystrokesShowCPS = ${JSON.stringify(!!settings["keystrokes.showCPS"])};
+        window.__mfSettings.keystrokesShadow = ${JSON.stringify(!!settings["keystrokes.shadow"])};
+        window.__mfSettings.keystrokesBorder = ${JSON.stringify(!!settings["keystrokes.border"])};
+        window.__mfSettings.keystrokesBorderWidth = ${JSON.stringify(settings["keystrokes.borderWidth"] ?? 1)};
+        window.__mfSettings.keystrokesBorderColor = ${JSON.stringify(settings["keystrokes.borderColor"] ?? "#ffffff")};
+        window.__mfSettings.keystrokesScale = ${JSON.stringify(settings["keystrokes.scale"] ?? 1.0)};
+        window.__mfSettings.keystrokesX = ${JSON.stringify(settings["keystrokes.x"] ?? 20)};
+        window.__mfSettings.keystrokesY = ${JSON.stringify(settings["keystrokes.y"] ?? 40)};
+        window.__mfSettings.keystrokesBg = ${JSON.stringify(settings["keystrokes.bgColor"] ?? "#00000088")};
+        window.__mfSettings.keystrokesBgPress = ${JSON.stringify(settings["keystrokes.bgPressColor"] ?? "#ffffff")};
+        window.__mfSettings.keystrokesText = ${JSON.stringify(settings["keystrokes.textColor"] ?? "#ffffff")};
+        window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.textPressColor"] ?? "#000000")};
     `);
 
-    const css = fs.readFileSync(path.join(__dirname, "menu/menu.css"), "utf8");
-    await wc.executeJavaScript(`
-        (function(){
-            var el = document.getElementById("__matrix_style");
-            if (el) el.remove();
-            var s = document.createElement("style");
-            s.id = "__matrix_style";
-            s.textContent = ${JSON.stringify(css)};
-            document.head.appendChild(s);
-        })();
-    `);
+    const cssPath = path.join(__dirname, "menu/menu.css");
+    const htmlPath = path.join(__dirname, "menu/menu.html");
+    const menuJsPath = path.join(__dirname, "menu/menu.js");
 
-    const html = fs.readFileSync(path.join(__dirname, "menu/menu.html"), "utf8");
-    await wc.executeJavaScript(`
-        (function(){
-            var el = document.getElementById("__matrix_root");
-            if (el) el.remove();
-            var wrap = document.createElement("div");
-            wrap.id = "__matrix_root";
-            wrap.innerHTML = ${JSON.stringify(html)};
-            document.body.appendChild(wrap);
-        })();
-    `);
+    try {
+        const css = fs.readFileSync(cssPath, "utf8");
+        await runPage("Matrix menu CSS", `
+            (function(){
+                var el = document.getElementById("__matrix_style");
+                if (el) el.remove();
+                var s = document.createElement("style");
+                s.id = "__matrix_style";
+                s.textContent = ${JSON.stringify(css)};
+                document.head.appendChild(s);
+            })();
+        `);
+    } catch (error) {
+        console.error("[Matrix] Menu CSS load failed:", error?.message || error);
+    }
 
-    const js = fs.readFileSync(path.join(__dirname, "menu/menu.js"), "utf8");
-    const translatorJs = fs.readFileSync(path.join(__dirname, "features/translation.js"), "utf8");
-    const visualModsJs = fs.readFileSync(path.join(__dirname, "features/matrix-visual-mods.js"), "utf8");
-    const customTagsJs = fs.readFileSync(path.join(__dirname, "features/custom-tags.js"), "utf8");
-    const extraModsJs = fs.readFileSync(path.join(__dirname, "features/extra-mods.js"), "utf8");
-    const communityModsJs = fs.readFileSync(path.join(__dirname, "features/community-mods.js"), "utf8");
-    const minecraftTexturesJs = fs.readFileSync(path.join(__dirname, "../vendor/Minecraft Texture Pack for Minefun.js"), "utf8");
+    try {
+        const html = fs.readFileSync(htmlPath, "utf8");
+        await runPage("Matrix menu HTML", `
+            (function(){
+                var el = document.getElementById("__matrix_root");
+                if (el) el.remove();
+                var wrap = document.createElement("div");
+                wrap.id = "__matrix_root";
+                wrap.innerHTML = ${JSON.stringify(html)};
+                wrap.style.position = "fixed";
+                wrap.style.zIndex = "2147483647";
+                wrap.style.pointerEvents = "auto";
+                document.body.appendChild(wrap);
+                wrap.querySelectorAll("*").forEach(function(node){ node.style.pointerEvents = "auto"; });
+            })();
+        `);
+    } catch (error) {
+        console.error("[Matrix] Menu HTML load failed:", error?.message || error);
+    }
+
+    const js = fs.existsSync(menuJsPath) ? fs.readFileSync(menuJsPath, "utf8") : "";
+    const translatorJs = fs.existsSync(path.join(__dirname, "features/translation.js")) ? fs.readFileSync(path.join(__dirname, "features/translation.js"), "utf8") : "";
+    const visualModsJs = fs.existsSync(path.join(__dirname, "features/matrix-visual-mods.js")) ? fs.readFileSync(path.join(__dirname, "features/matrix-visual-mods.js"), "utf8") : "";
+    const customTagsJs = fs.existsSync(path.join(__dirname, "features/custom-tags.js")) ? fs.readFileSync(path.join(__dirname, "features/custom-tags.js"), "utf8") : "";
+    const extraModsJs = fs.existsSync(path.join(__dirname, "features/extra-mods.js")) ? fs.readFileSync(path.join(__dirname, "features/extra-mods.js"), "utf8") : "";
+    const communityModsJs = fs.existsSync(path.join(__dirname, "features/community-mods.js")) ? fs.readFileSync(path.join(__dirname, "features/community-mods.js"), "utf8") : "";
+    const advancedModsJs = fs.existsSync(path.join(__dirname, "features/advanced-mods.js")) ? fs.readFileSync(path.join(__dirname, "features/advanced-mods.js"), "utf8") : "";
+    const minecraftTexturesPath = path.join(__dirname, "../vendor/Minecraft Texture Pack for Minefun.js");
+    const minecraftTexturesJs = fs.existsSync(minecraftTexturesPath) ? fs.readFileSync(minecraftTexturesPath, "utf8") : "";
+
     const customTagMatheusPath = path.join(__dirname, "assets/customtag-matheus.png");
     const customTagCoconutPath = path.join(__dirname, "assets/customtag-coconut.png");
     const glitchHunterBadgePath = path.join(__dirname, "assets/badges/glitchhunter.webp");
@@ -716,22 +760,25 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
     let customTagCoconutDataUrl = "";
     let glitchHunterBadgeDataUrl = "";
     let zephronBadgeDataUrl = "";
+
     try {
-        customTagMatheusDataUrl = "data:image/png;base64," + fs.readFileSync(customTagMatheusPath).toString("base64");
-        customTagCoconutDataUrl = "data:image/png;base64," + fs.readFileSync(customTagCoconutPath).toString("base64");
+        if (fs.existsSync(customTagMatheusPath)) customTagMatheusDataUrl = "data:image/png;base64," + fs.readFileSync(customTagMatheusPath).toString("base64");
+        if (fs.existsSync(customTagCoconutPath)) customTagCoconutDataUrl = "data:image/png;base64," + fs.readFileSync(customTagCoconutPath).toString("base64");
         if (fs.existsSync(glitchHunterBadgePath)) glitchHunterBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(glitchHunterBadgePath).toString("base64");
         if (fs.existsSync(zephronBadgePath)) zephronBadgeDataUrl = "data:image/webp;base64," + fs.readFileSync(zephronBadgePath).toString("base64");
     } catch (e) {
         console.error("[Matrix] Custom tag asset load failed:", e.message);
     }
+
     const fontPath = path.join(__dirname, "assets/LoveDays.ttf");
     let loveDaysDataUrl = "";
     try {
-        loveDaysDataUrl = "data:font/ttf;base64," + fs.readFileSync(fontPath).toString("base64");
+        if (fs.existsSync(fontPath)) loveDaysDataUrl = "data:font/ttf;base64," + fs.readFileSync(fontPath).toString("base64");
     } catch (e) {
         console.error("[Matrix] Local font asset load failed:", e.message);
     }
-    await wc.executeJavaScript(`
+
+    await runPage("Matrix assets", `
         window.__matrixAssets = {
             loveDaysFont: ${JSON.stringify(loveDaysDataUrl)},
             matheusTag: ${JSON.stringify(customTagMatheusDataUrl)},
@@ -739,35 +786,50 @@ window.__mfSettings.keystrokesTextPress = ${JSON.stringify(settings["keystrokes.
             glitchHunterBadge: ${JSON.stringify(glitchHunterBadgeDataUrl)},
             zephronBadge: ${JSON.stringify(zephronBadgeDataUrl)}
         };
-    `);
-    // Load feature APIs before the menu so menu cards can bind immediately.
-    await wc.executeJavaScript(translatorJs);
-    await wc.executeJavaScript(visualModsJs);
-    await wc.executeJavaScript(`
         window.__matrixCustomTagAssets = {
             matheus: ${JSON.stringify(customTagMatheusDataUrl)},
             coconut: ${JSON.stringify(customTagCoconutDataUrl)}
         };
+        window.__matrixBadgeAssets = {
+            glitchhunter: ${JSON.stringify(glitchHunterBadgeDataUrl)},
+            zephron: ${JSON.stringify(zephronBadgeDataUrl)}
+        };
     `);
-    await wc.executeJavaScript(`window.__matrixCustomTagAssets={matheus:${JSON.stringify(customTagMatheusDataUrl)},coconut:${JSON.stringify(customTagCoconutDataUrl)}};window.__matrixBadgeAssets={glitchhunter:${JSON.stringify(glitchHunterBadgeDataUrl)},zephron:${JSON.stringify(zephronBadgeDataUrl)}};`);
-    await wc.executeJavaScript(customTagsJs);
-    const advancedModsJs = fs.readFileSync(path.join(__dirname, "features/advanced-mods.js"), "utf8");
-    await wc.executeJavaScript(advancedModsJs);
-    await wc.executeJavaScript(extraModsJs);
-    await wc.executeJavaScript(communityModsJs);
-    await wc.executeJavaScript(js);
-    await wc.executeJavaScript(`
-        if (window.__matrixSetTranslation) window.__matrixSetTranslation(${JSON.stringify(!!settings["translation.enabled"])}, ${JSON.stringify(settings["translation.lang"] ?? "pt")});
-        if (window.__matrixExtraMods) { window.__matrixExtraMods.setCleanScreen(${JSON.stringify(!!settings["clean-screen.enabled"])}); window.__matrixExtraMods.setSmoothCamera(${JSON.stringify(!!settings["smooth-camera.enabled"])}); window.__matrixExtraMods.setCinematic(${JSON.stringify(!!settings["cinematic-fx.enabled"])}); }
-        if (window.__matrixCommunityMods) window.__matrixCommunityMods.sync(${JSON.stringify(settings)});
-        if (${JSON.stringify(!!settings["advanced-mods.enabled"])}) { if (window.__matrixAdvancedMods) window.__matrixAdvancedMods.enable(); }
+
+    // Optional features are isolated so one broken feature cannot kill the menu.
+    await runPage("translation feature", translatorJs);
+    await runPage("visual mods feature", visualModsJs);
+    await runPage("custom tags feature", customTagsJs);
+    await runPage("advanced mods feature", advancedModsJs);
+    await runPage("extra mods feature", extraModsJs);
+    await runPage("community mods feature", communityModsJs);
+
+    // Menu is always attempted last and independently.
+    await runPage("Matrix menu", js);
+
+    await runPage("Matrix settings sync", `
+        if (window.__matrixSetTranslation) {
+            window.__matrixSetTranslation(${JSON.stringify(!!settings["translation.enabled"])}, ${JSON.stringify(settings["translation.lang"] ?? "pt")});
+        }
+        if (window.__matrixExtraMods) {
+            window.__matrixExtraMods.setCleanScreen(${JSON.stringify(!!settings["clean-screen.enabled"])});
+            window.__matrixExtraMods.setSmoothCamera(${JSON.stringify(!!settings["smooth-camera.enabled"])});
+            window.__matrixExtraMods.setCinematic(${JSON.stringify(!!settings["cinematic-fx.enabled"])});
+        }
+        if (window.__matrixCommunityMods) {
+            window.__matrixCommunityMods.sync(${JSON.stringify(settings)});
+        }
+        if (${JSON.stringify(!!settings["advanced-mods.enabled"])}) {
+            if (window.__matrixAdvancedMods) window.__matrixAdvancedMods.enable();
+        }
         if (${JSON.stringify(!!settings["minecraft-pack.enabled"])}) {
             try { ${minecraftTexturesJs} } catch (e) { console.error('[Matrix] Minecraft texture pack failed:', e); }
         }
     `);
 
-    console.log("[Matrix] Injected");
+    console.log("[Matrix] Injection completed. Menu errors (if any) were isolated.");
 }
+
 
 const AD_DOMAINS = [
     "doubleclick.net", "googlesyndication.com", "googletagmanager.com",
