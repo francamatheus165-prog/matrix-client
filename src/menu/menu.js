@@ -853,18 +853,20 @@
       var category = mod.category;
       var card = document.createElement("div");
 
-      // IMPORTANT: put expanded modules directly in the same .mods grid as
-      // the original Matrix cards. This avoids the nested-grid/overflow bug.
-      card.className = "card matrix-expanded-card";
+      // Keep expanded modules as native Matrix cards, but use UNIQUE class names
+      // and inline sizing so MineFun's own page CSS cannot distort the cards.
+      card.className = "card matrix-celestar-card";
       card.dataset.mod = "celestar-" + id;
+      var catText = Array.isArray(category) ? category.join(" · ") : String(category || "");
       card.innerHTML =
-        '<div class="card-icon matrix-suite-icon" aria-hidden="true">✦</div>' +
-        '<div class="name">' + esc(name) + '</div>' +
-        '<div class="suite-category">' + esc(Array.isArray(category) ? category.join(" · ") : category) + '</div>' +
-        '<div class="card-btn">' +
+        '<div class="matrix-celestar-card-icon" aria-hidden="true" style="width:24px;height:24px;margin-top:13px;display:flex;align-items:center;justify-content:center;color:var(--grey-2);font:400 18px/24px Arial,sans-serif;flex:0 0 auto;overflow:hidden;">✦</div>' +
+        '<div class="matrix-celestar-card-name" style="width:134px;margin-top:7px;padding:0;color:var(--grey-1);font:600 13px/16px Arial,sans-serif;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;">' + esc(name) + '</div>' +
+        '<div class="matrix-celestar-card-category" style="width:132px;margin-top:4px;color:var(--grey-2);font:500 9px/12px Arial,sans-serif;text-align:center;text-transform:uppercase;letter-spacing:.45px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;">' + esc(catText) + '</div>' +
+        '<div class="matrix-celestar-card-actions" style="width:100%;margin-top:auto;display:flex;flex-direction:column;flex:0 0 auto;">' +
         '<button class="options" type="button">Options</button>' +
         '<button class="toggle-btn" type="button">Disabled</button>' +
         '</div>';
+      card.style.cssText += ';width:148px;height:148px;min-width:148px;max-width:148px;min-height:148px;max-height:148px;position:relative;display:flex;flex-direction:column;align-items:center;overflow:hidden;box-sizing:border-box;flex-shrink:0;';
 
       var toggle = card.querySelector('.toggle-btn');
       var options = card.querySelector('.options');
