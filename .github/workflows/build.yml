@@ -1,4 +1,4 @@
-name: Matrix Client — GitHub Auto Build
+name: Matrix Client — Automatic Windows Build
 
 on:
   push:
@@ -11,12 +11,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: matrix-client-auto-build
+  group: matrix-client-build
   cancel-in-progress: true
 
 env:
   RELEASE_TAG: matrix-auto
-  RELEASE_NAME: Matrix Client — GitHub Auto Update
+  RELEASE_NAME: Matrix Client — Automatic Build
   INSTALLER_NAME: Matrix-Client-MathPRIME-Setup.exe
   UPDATE_BRANCH: updates
 
@@ -131,7 +131,10 @@ jobs:
         run: |
           $assets = gh release view $env:RELEASE_TAG --json assets --jq '.assets[].name'
           foreach ($asset in $assets) {
-            gh release delete-asset $env:RELEASE_TAG $asset --yes
+            if ($asset -ne $env:INSTALLER_NAME) {
+              Write-Host "Removing old release asset: $asset"
+              gh release delete-asset $env:RELEASE_TAG $asset --yes
+            }
           }
 
       - name: Publish ONLY the EXE
@@ -152,8 +155,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           $metadata = @{
-            version = ((Get-Content package.json -Raw | ConvertFrom-Json).version)
+            version = $pkg.version
             buildId = "${{ github.sha }}"
             commit = "${{ github.sha }}"
             runNumber = "${{ github.run_number }}"
@@ -180,6 +184,7 @@ jobs:
 
           Set-Content -Path "latest.json" -Value $metadata -Encoding UTF8
           git add latest.json
+
           git commit -m "Update Matrix Client build metadata [skip ci]" 2>$null
           git push origin "HEAD:$env:UPDATE_BRANCH" --force
 
