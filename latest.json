@@ -1,0 +1,12 @@
+{
+  "runNumber": "29",
+  "generatedAt": "2026-09-12T13:35:23.2811000Z",
+  "channel": "github-auto",
+  "repository": "francamatheus165-prog/matrix-client",
+  "installerUrl": "https://github.com/francamatheus165-prog/matrix-client/releases/download/matrix-auto/Matrix-Client-MathPRIME-Setup.exe",
+  "buildId": "a7ff1cec49a73109ca126c5f09f726bd784a6e62",
+  "sha256": "bdbe6eb53318c55b67447c4b2f70a4390aa52f9a3f9e87fe0343684c18a22f75",
+  "installerName": "Matrix-Client-MathPRIME-Setup.exe",
+  "version": "1.3.4",
+  "commit": "a7ff1cec49a73109ca126c5f09f726bd784a6e62"
+}
