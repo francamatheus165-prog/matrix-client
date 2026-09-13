@@ -1,0 +1,186 @@
+name: Matrix Client — Multi-Platform Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: matrix-client-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            args: --win --x64
+            artifact: windows-x64
+          - name: Linux x64
+            os: ubuntu-latest
+            args: --linux --x64
+            artifact: linux-x64
+          - name: macOS x64
+            os: macos-13
+            args: --mac --x64
+            artifact: macos-x64
+          - name: macOS arm64
+            os: macos-14
+            args: --mac --arm64
+            artifact: macos-arm64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stamp build information
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const pkg = require('./package.json');
+          const info = {
+            version: pkg.version,
+            buildId: process.env.GITHUB_SHA,
+            channel: 'github-actions',
+            source: 'github-push',
+            commit: process.env.GITHUB_SHA,
+            runNumber: process.env.GITHUB_RUN_NUMBER,
+            platform: process.platform,
+            builtAt: new Date().toISOString()
+          };
+          fs.writeFileSync('src/update-info.json', JSON.stringify(info, null, 2) + '\n');
+          NODE
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Build Electron application
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Matrix-Client-${{ matrix.artifact }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.yml
+            dist/*.blockmap
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Matrix-Client-windows-x64
+          path: release-assets/windows
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Matrix-Client-linux-x64
+          path: release-assets/linux
+
+      - name: Download macOS x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Matrix-Client-macos-x64
+          path: release-assets/macos-x64
+
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Matrix-Client-macos-arm64
+          path: release-assets/macos-arm64
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          find release-assets -type f \( \
+            -name '*.exe' -o \
+            -name '*.dmg' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' \
+          \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt || true
+
+      - name: Create rolling GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="matrix-auto"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "Matrix Client v$VERSION — Automatic Build" \
+              --notes "Automatic multi-platform build from commit $GITHUB_SHA." \
+              --prerelease \
+              --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" \
+              --title "Matrix Client v$VERSION — Automatic Build" \
+              --notes "Automatic multi-platform build from commit $GITHUB_SHA." \
+              --prerelease \
+              --target "$GITHUB_SHA"
+          fi
+
+          find release-assets -type f \( \
+            -name '*.exe' -o \
+            -name '*.dmg' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' \
+          \) -print > assets.txt
+
+          while IFS= read -r file; do
+            gh release upload "$TAG" "$file" --clobber
+          done < assets.txt
+
+          gh release upload "$TAG" SHA256SUMS.txt --clobber
