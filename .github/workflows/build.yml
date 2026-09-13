@@ -23,13 +23,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install dependencies
         run: npm install
 
       - name: Build Windows
-        run: npx electron-builder --win nsis portable --x64
+        run: npx electron-builder --win nsis portable --x64 --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -42,7 +42,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     needs:
       - build-windows
 
