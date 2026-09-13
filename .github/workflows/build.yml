@@ -1,4 +1,3 @@
-```yaml
 name: Matrix Client Build
 
 on:
@@ -13,29 +12,20 @@ permissions:
   contents: write
 
 jobs:
-  # =========================================================
-  # WINDOWS
-  # =========================================================
   build-windows:
     name: Build Windows x64
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-
       - name: Install dependencies
         run: npm install
-
       - name: Build Windows
         run: npx electron-builder --win nsis portable --x64
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -43,32 +33,21 @@ jobs:
           path: |
             dist/*.exe
             dist/*.blockmap
-          if-no-files-found: error
 
-
-  # =========================================================
-  # LINUX
-  # =========================================================
   build-linux:
     name: Build Linux x64
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-
       - name: Install dependencies
         run: npm install
-
       - name: Build Linux
         run: npx electron-builder --linux AppImage deb --x64
-
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -77,57 +56,41 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.blockmap
-          if-no-files-found: error
 
-
-  # =========================================================
-  # CHECKSUMS
-  # =========================================================
   checksums:
     name: Generate SHA256 checksums
     runs-on: ubuntu-latest
     needs:
       - build-windows
       - build-linux
-
     steps:
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: matrix-client-windows-x64
           path: artifacts/windows
-
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: matrix-client-linux-x64
           path: artifacts/linux
-
       - name: Generate checksums
         shell: bash
         run: |
           mkdir -p release
-
-          find artifacts -type f \
-            \( -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) \
+          find artifacts -type f \\
+            \( -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) \\
             -print0 |
           while IFS= read -r -d '' file; do
             sha256sum "$file" >> release/SHA256SUMS.txt
           done
-
-          echo "Generated checksums:"
           cat release/SHA256SUMS.txt
-
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
           name: matrix-client-checksums
           path: release/SHA256SUMS.txt
 
-
-  # =========================================================
-  # GITHUB RELEASE
-  # =========================================================
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
@@ -135,35 +98,23 @@ jobs:
       - build-windows
       - build-linux
       - checksums
-
-    # Só publica Release quando o push for uma tag v*
     if: startsWith(github.ref, 'refs/tags/v')
-
     steps:
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: matrix-client-windows-x64
           path: release
-
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: matrix-client-linux-x64
           path: release
-
       - name: Download checksums
         uses: actions/download-artifact@v4
         with:
           name: matrix-client-checksums
           path: release
-
-      - name: List release files
-        shell: bash
-        run: |
-          echo "Files to publish:"
-          find release -type f -maxdepth 2 -print
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -175,4 +126,3 @@ jobs:
             release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
